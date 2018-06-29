@@ -30,7 +30,8 @@ if __name__ == '__main__':
 
 	# model hyper-parameters
 	parser.add_argument('--image_size', type=int, default=128)
-	parser.add_argument('--z_dim', type=int, default=256)
+	parser.add_argument('--z_dim', type=int, default=300)
+	parser.add_argument('--text_maxlen', type=int, default=300)
 
 	# training hyper-parameters
 	parser.add_argument('--sample_epochs', type=int, default=100)
@@ -56,4 +57,3 @@ if __name__ == '__main__':
 	config = parser.parse_args()
 	print(config)
 	main(config)
-

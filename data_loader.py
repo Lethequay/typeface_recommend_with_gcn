@@ -26,14 +26,17 @@ class ImageFolder(data.Dataset):
 		"""Reads an image from a file and preprocesses it and returns."""
 		tokens = self.data_arr[index]
 		typography = tokens[0]
-		text = tokens[1:]
+		text = list(map(int, tokens[1:]))
+		text = torch.from_numpy(np.asarray(text))
 
 		image = Image.open(self.image_path+
 						   typography.replace(' ','_').replace('/','-')+'.png')
-		image = image.resize((440,231), Image.ANTIALIAS)
+		size1 = image.size
+		image = image.resize((440, 231), Image.ANTIALIAS)
+		size2 = image.size
 		if self.transform is not None:
 			image = self.transform(image)
-		print(image.size())
+		size3 = image.size()
 
 		return typography, image, text
 
@@ -55,4 +58,3 @@ def get_loader(data_path, image_path, batch_size, num_workers=2):
 								  shuffle=True,
 								  num_workers=num_workers)
 	return data_loader
-
