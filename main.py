@@ -29,7 +29,7 @@ if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 
 	# model hyper-parameters
-	parser.add_argument('--image_size', type=int, default=128)
+	parser.add_argument('--image_size', default=(440, 231))
 	parser.add_argument('--z_dim', type=int, default=300)
 	parser.add_argument('--text_maxlen', type=int, default=300)
 

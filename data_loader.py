@@ -26,19 +26,17 @@ class ImageFolder(data.Dataset):
 		"""Reads an image from a file and preprocesses it and returns."""
 		tokens = self.data_arr[index]
 		typography = tokens[0]
-		text = list(map(int, tokens[1:]))
+		text = list(map(int, tokens[1:-1]))
 		text = torch.from_numpy(np.asarray(text))
+		length = int(tokens[-1])
 
 		image = Image.open(self.image_path+
 						   typography.replace(' ','_').replace('/','-')+'.png')
-		size1 = image.size
 		image = image.resize((440, 231), Image.ANTIALIAS)
-		size2 = image.size
 		if self.transform is not None:
 			image = self.transform(image)
-		size3 = image.size()
 
-		return typography, image, text
+		return typography, image, text, length
 
 	def __len__(self):
 		"""Returns the total number of font files."""

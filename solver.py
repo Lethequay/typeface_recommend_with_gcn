@@ -9,7 +9,6 @@ from torch.autograd import Variable
 import torch.nn.functional as F
 from model import *
 
-
 class Solver(object):
 	def __init__(self, config, data_loader):
 
@@ -18,10 +17,12 @@ class Solver(object):
 
 		# Models
 		self.text_encoder = None
+		self.image_encoder = None
 
 		# Models hyper-parameters
+		self.image_size = config.image_size
 		self.z_dim = config.z_dim
-		
+
 		# Hyper-parameters
 		self.lr = config.lr
 		self.beta1 = config.beta1
@@ -48,15 +49,21 @@ class Solver(object):
 
 	def build_model(self):
 		self.text_encoder = Text_Encoder(self.z_dim, self.text_maxlen)
+		self.image_encoder = Image_Encoder(self.image_size)
 		self.optimizer = optim.Adam(self.text_encoder.parameters(),
 									self.lr, [self.beta1, self.beta2])
 
 		if torch.cuda.is_available():
 			self.text_encoder.cuda()
+			self.image_encoder.cuda()
 
 	def train(self):
 
-		for i, (typography, image, text) in enumerate(self.data_loader):
+		for i, (typography, image, text, text_len) in enumerate(self.data_loader):
+			image = image.to(self.device)
 			text = text.to(self.device)
-			text = self.text_encoder(text)
+			text_len = text_len.to(self.device)
+
+			text_emb  = self.text_encoder(text, text_len)
+			image_emb = self.image_encoder(image, typography)
 			break
