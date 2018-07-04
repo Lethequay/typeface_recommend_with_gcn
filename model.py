@@ -41,11 +41,26 @@ class Image_Encoder(nn.Module):
 		super(Image_Encoder, self).__init__()
 
 		self.image_size = image_size
-		self.kernel_sizes = range(5,15)
-		self.convs = nn.ModuleList([nn.Sequential(
-					 nn.Conv2d(2, 10, kernel_size=i),
-					 nn.ReLU(inplace=True))
-					 for i in self.kernel_sizes])
+		self.kernel_sizes = range(5,20)
+		self.style_convs = nn.ModuleList([nn.Sequential(
+						   nn.Conv2d(2, 10, kernel_size=i),
+						   nn.ReLU(inplace=True))
+						   for i in self.kernel_sizes])
+
+		self.resnet18 =  getattr(models, 'resnet18')(pretrained=True)
+		self.resnet18.conv1 = nn.Conv2d(2, 64, kernel_size=7, stride=2, padding=3,
+		                                bias=False)
+		self.context_conv = nn.Sequential(
+							            self.resnet18.conv1,
+							            self.resnet18.bn1,
+							            self.resnet18.relu,
+							            self.resnet18.maxpool,
+							            self.resnet18.layer1,
+							            self.resnet18.layer2,
+							            self.resnet18.layer3,
+							            self.resnet18.layer4
+								        )
+		#context_rnn = nn.GRU()
 		self.avgpools = nn.ModuleList([
 						nn.AvgPool2d((self.image_size[1]-i+1, self.image_size[0]-i+1))
 						for i in self.kernel_sizes])
@@ -55,12 +70,24 @@ class Image_Encoder(nn.Module):
 
 
 	def forward(self, input, typography):
+
+		conv_out = self.context_conv(input)
+		print(conv_out.size())
+		seq_out = features_to_sequence(conv_out)
+		print(seq_out.size())
+
+
 		# input : (440 x 231)
+		out_list = []
 		for i, k in enumerate(self.kernel_sizes):
 			conv_out = self.convs[i](input)
 			# mean/max avg
 			maxpool_out = self.maxpools[i](conv_out)
 			avgpool_out = self.avgpools[i](conv_out)
-			print(maxpool_out.size())
-			print(avgpool_out.size())
-			break
+			out_list.append(maxpool_out.squeeze())
+			out_list.append(avgpool_out.squeeze())
+		# style_out : (batch x 300)
+		style_out = torch.cat(out_list, 1)
+
+
+		return style_out
