@@ -31,6 +31,7 @@ class Solver(object):
 		self.text_maxlen = config.text_maxlen
 
 		# Training settings
+		self.start_epochs = config.start_epochs
 		self.sample_epochs = config.sample_epochs
 		self.num_epochs = config.num_epochs
 		self.num_epochs_decay = config.num_epochs_decay
@@ -64,12 +65,27 @@ class Solver(object):
 		self.text_encoder.zero_grad()
 		self.image_encoder.zero_grad()
 
+	def restore_model(self, resume_iters):
+		"""Restore the trained generator and discriminator."""
+		te_path = os.path.join(self.model_path, 'text-encoder-%d.pkl' %(resume_iters))
+		ie_path = os.path.join(self.model_path, 'image-encoder-%d.pkl' %(resume_iters))
+		if os.path.isfile(te_path) and os.path.isfile(ie_path):
+			self.text_encoder.load_state_dict(torch.load(te_path, map_location=lambda storage, loc: storage))
+			self.image_encoder.load_state_dict(torch.load(ie_path, map_location=lambda storage, loc: storage))
+			print('te/se is Successfully Loaded from %d epoch'%resume_iters)
+			return resume_iters
+		else:
+			return 0
+
+
 	def train(self):
+
+		start_iter = self.restore_model(self.start_epochs)
 
 		iters_per_epoch = len(self.train_loader)
 		start_time = time.time()
 
-		for epoch in range(self.num_epochs):
+		for epoch in range(start_iter, self.num_epochs):
 			for i, (typography, pos_image, neg_image, text, text_len) in enumerate(self.train_loader):
 				pos_image = pos_image.to(self.device)
 				neg_image = neg_image.to(self.device)
@@ -108,7 +124,7 @@ class Solver(object):
 				self.image_encoder.eval()
 
 				val_loss = 0.
-				for i, (typography, pos_image,_, text, text_len) in enumerate(self.train_loader):
+				for i, (typography, pos_image,_, text, text_len) in enumerate(self.test_loader):
 					image = pos_image.to(self.device)
 					text = text.to(self.device)
 					text_len = text_len.to(self.device)
@@ -130,3 +146,46 @@ class Solver(object):
 
 				self.text_encoder.train(True)
 				self.image_encoder.train(True)
+
+	def sample(self):
+
+		self.restore_model(self.sample_epochs)
+		id2word = np.load("./data/word_emb/ft_i2w.npy")
+		word2id = np.load("./data/word_emb/ft_w2i.npy").item()
+
+		cl_typo = None
+		cl_dist = 9999
+		from_word = 'fact'
+		from_word = Variable(torch.from_numpy(np.asarray(word2id[from_word]))).cuda()
+		with torch.no_grad():
+			from_word_vec = self.text_encoder.idx2vec(from_word)
+			for i, (typography, pos_image,_, text,_) in enumerate(self.test_loader):
+				pos_image = pos_image.to(self.device)
+				pos_style_emb, pos_context_emb = self.image_encoder(pos_image)
+
+				'''
+				# The Closest Words from a Typography
+				# (batch x 999994)
+				mm = torch.mm(pos_style_emb, self.text_encoder.idx2vec.weight[2:].t())
+
+				batch_size = 10
+				iters = mm.size(0)//batch_size + 1
+				for j in range(iters):
+					_, rank = torch.sort(mm[j*batch_size:(j+1)*batch_size], descending=True)
+					rank = rank.data.cpu().numpy()
+					for k in range(batch_size):
+						print(typography[i*batch_size+k], [id2word[idx] for idx in rank[k,:10]])
+					break
+				break
+				'''
+
+				# The Closest Typographies from a Word
+				# (1 x batch_size)
+				mm = torch.abs(torch.mm(from_word_vec.unsqueeze(0), pos_style_emb.t()))
+				min_value, min_idx = torch.min(mm, 1)
+				if cl_dist > min_value[0]:
+					cl_dist = min_value[0]
+					cl_typo = typography[min_idx[0]]
+					print(cl_dist, cl_typo)
+
+			print("The Closest Typo is", cl_typo)
