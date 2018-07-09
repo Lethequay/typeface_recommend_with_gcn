@@ -42,15 +42,17 @@ if __name__ == '__main__':
 
 	# model hyper-parameters
 	parser.add_argument('--image_size', default=(256, 32))
+	parser.add_argument('--word_dim', type=int, default=300)
 	parser.add_argument('--z_dim', type=int, default=300)
 	parser.add_argument('--text_maxlen', type=int, default=300)
+	parser.add_argument('--num_typo', type=int , default=2349)
 
 	# training hyper-parameters
-	parser.add_argument('--sample_epochs', type=int, default=50)
+	parser.add_argument('--sample_epochs', type=int, default=100)
 	parser.add_argument('--start_epochs', type=int, default=0)
 	parser.add_argument('--num_epochs', type=int, default=100)
 	parser.add_argument('--num_epochs_decay', type=int, default=50)
-	parser.add_argument('--batch_size', type=int, default=64)
+	parser.add_argument('--batch_size', type=int, default=2)
 	parser.add_argument('--num_workers', type=int, default=8)
 	parser.add_argument('--lr', type=float, default=0.00001)
 	parser.add_argument('--lambda_cls', type=float, default=1)

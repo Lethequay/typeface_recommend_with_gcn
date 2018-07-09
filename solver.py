@@ -22,7 +22,9 @@ class Solver(object):
 
 		# Models hyper-parameters
 		self.image_size = config.image_size
+		self.word_dim = config.word_dim
 		self.z_dim = config.z_dim
+		self.num_typo = config.num_typo
 
 		# Hyper-parameters
 		self.lr = config.lr
@@ -50,8 +52,8 @@ class Solver(object):
 		self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 	def build_model(self):
-		self.text_encoder = Text_Encoder(self.z_dim, self.text_maxlen)
-		self.image_encoder = Image_Encoder(self.z_dim, self.image_size)
+		self.text_encoder = Text_Encoder(self.word_dim, self.z_dim, self.text_maxlen)
+		self.image_encoder = Image_Encoder(self.z_dim, self.image_size, self.num_typo)
 		self.optimizer = optim.Adam(list(filter(lambda p: p.requires_grad, self.text_encoder.parameters())) + \
 									list(self.image_encoder.parameters()),
 									self.lr, [self.beta1, self.beta2])
@@ -87,6 +89,7 @@ class Solver(object):
 
 		for epoch in range(start_iter, self.num_epochs):
 			for i, (typography, pos_image, neg_image, text, text_len) in enumerate(self.train_loader):
+				typography = typography.to(self.device)
 				pos_image = pos_image.to(self.device)
 				neg_image = neg_image.to(self.device)
 				text = text.to(self.device)
@@ -95,10 +98,11 @@ class Solver(object):
 				# (batch x z_dim)
 				text_emb  = self.text_encoder(text, text_len)
 				# (batch x z_dim), (batch x z_dim)
-				pos_style_emb, pos_context_emb = self.image_encoder(pos_image)
-				neg_style_emb, neg_context_emb = self.image_encoder(neg_image)
+				pos_style_emb, cls_out, pos_context_emb = self.image_encoder(pos_image)
+				neg_style_emb, _,       neg_context_emb = self.image_encoder(neg_image)
 
-				loss = F.triplet_margin_loss(text_emb, pos_style_emb, neg_style_emb, margin=1)
+				loss  = F.triplet_margin_loss(text_emb, pos_style_emb, neg_style_emb, margin=1)
+				loss += F.cross_entropy(cls_out, typography)
 				# GAN / OCR
 
 
@@ -116,6 +120,7 @@ class Solver(object):
 							elapsed, epoch+1, self.num_epochs, i+1, iters_per_epoch)
 					log += ", loss: {:.4f}".format(loss)
 					print(log)
+
 
 			if (epoch+1) % self.val_step == 0:
 				self.text_encoder.train(False)
@@ -155,7 +160,7 @@ class Solver(object):
 
 		cl_typo = None
 		cl_dist = 9999
-		from_word = 'fact'
+		from_word = 'digital'
 		from_word = Variable(torch.from_numpy(np.asarray(word2id[from_word]))).cuda()
 		with torch.no_grad():
 			from_word_vec = self.text_encoder.idx2vec(from_word)

@@ -18,10 +18,13 @@ class ImageFolder(data.Dataset):
 		self.data_arr = np.load(data_path)
 		shuffle(self.data_arr)
 
+		self.typo_dict = np.load('./data/typo_dict.npy').item()
+		self.typo_size = len(self.typo_dict)
+
 		self.image_size = image_size
 		self.image_path = image_path
 		self.image_paths = list(map(lambda x: os.path.join(image_path, x), os.listdir(image_path)))
-		self.idx2typos = np.load('./data/idx2typos.npy').item()
+		self.dataidx2typos = np.load('./data/idx2typos.npy').item()
 
 		self.transform = transform
 		self.train_dataset = []
@@ -32,6 +35,7 @@ class ImageFolder(data.Dataset):
 			self.data_size = len(self.train_dataset)
 		else:
 			self.data_size = len(self.test_dataset)
+		print("typo count :", self.typo_size)
 		print("data count :", self.data_size)
 		print("image count :", len(self.image_paths))
 
@@ -57,13 +61,14 @@ class ImageFolder(data.Dataset):
 							   typography.replace(' ','_').replace('/','=')+'.png')\
 							   .convert("L")
 		neg_image = Image.open(random.choice([x for x in self.image_paths
-							   if x[len(self.image_path):-len('.png')] not in self.idx2typos[idx]]))\
+							   if x[len(self.image_path):-len('.png')] not in self.dataidx2typos[idx]]))\
 							   .convert("L")
 		pos_image = pos_image.resize(self.image_size, Image.ANTIALIAS)
 		neg_image = neg_image.resize(self.image_size, Image.ANTIALIAS)
 		if self.transform is not None:
 			pos_image = self.transform(pos_image)
 			neg_image = self.transform(neg_image)
+		typography = self.typo_dict[typography]
 
 		return typography, pos_image, neg_image, text, length
 
