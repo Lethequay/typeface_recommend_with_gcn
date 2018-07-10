@@ -2,6 +2,7 @@ import os
 import numpy as np
 import time
 import datetime
+from sklearn.metrics import accuracy_score
 import torch
 import torchvision
 from torch import optim
@@ -83,11 +84,11 @@ class Solver(object):
 	def train(self):
 
 		start_iter = self.restore_model(self.start_epochs)
-
 		iters_per_epoch = len(self.train_loader)
 		start_time = time.time()
 
 		for epoch in range(start_iter, self.num_epochs):
+			acc = 0.
 			for i, (typography, pos_image, neg_image, text, text_len) in enumerate(self.train_loader):
 				typography = typography.to(self.device)
 				pos_image = pos_image.to(self.device)
@@ -98,9 +99,11 @@ class Solver(object):
 				# (batch x z_dim)
 				text_emb  = self.text_encoder(text, text_len)
 				# (batch x z_dim), (batch x z_dim)
-				pos_style_emb, cls_out, pos_context_emb = self.image_encoder(pos_image)
-				neg_style_emb, _,       neg_context_emb = self.image_encoder(neg_image)
+				pos_style_emb, cls_out, pos_content_emb = self.image_encoder(pos_image)
+				neg_style_emb, _,       neg_content_emb = self.image_encoder(neg_image)
 
+				_, pred = torch.max(cls_out, 1)
+				acc  += accuracy_score(pred.data.cpu().numpy(), typography)
 				loss  = F.triplet_margin_loss(text_emb, pos_style_emb, neg_style_emb, margin=1)
 				loss += F.cross_entropy(cls_out, typography)
 				# GAN / OCR
@@ -118,10 +121,11 @@ class Solver(object):
 
 					log = "Elapsed [{}], Epoch [{}/{}], Iter [{}/{}]".format(
 							elapsed, epoch+1, self.num_epochs, i+1, iters_per_epoch)
-					log += ", loss: {:.4f}".format(loss)
+					log += ", loss: {:.4f}, acc.: {:.4f}".format(loss, acc/(i+1))
 					print(log)
 
 
+			#==================================== Validation ====================================#
 			if (epoch+1) % self.val_step == 0:
 				self.text_encoder.train(False)
 				self.image_encoder.train(False)
@@ -129,6 +133,7 @@ class Solver(object):
 				self.image_encoder.eval()
 
 				val_loss = 0.
+				val_acc  = 0.
 				for i, (typography, pos_image,_, text, text_len) in enumerate(self.test_loader):
 					image = pos_image.to(self.device)
 					text = text.to(self.device)
@@ -137,12 +142,14 @@ class Solver(object):
 					# (batch x z_dim)
 					text_emb  = self.text_encoder(text, text_len)
 					# (batch x z_dim), (batch x z_dim)
-					style_emb, context_emb = self.image_encoder(image)
+					style_emb, cls_out, content_emb = self.image_encoder(image)
 
+					_, pred = torch.max(cls_out, 1)
+					val_acc  += accuracy_score(pred.data.cpu().numpy(), typography)
 					val_loss += torch.mean((text_emb - style_emb) ** 2).item()
 
-				print('Valid Loss: ', end='')
-				print("{:.4f}".format(val_loss/(i+1)))
+				print('Valid Loss: {:.4f}, Valid Acc.: {:.4f}'\
+					  .format(val_loss/(i+1), val_acc/(i+1)))
 
 				te_path = os.path.join(self.model_path, 'text-encoder-%d.pkl' %(epoch+1))
 				ie_path = os.path.join(self.model_path, 'image-encoder-%d.pkl' %(epoch+1))
@@ -166,7 +173,7 @@ class Solver(object):
 			from_word_vec = self.text_encoder.idx2vec(from_word)
 			for i, (typography, pos_image,_, text,_) in enumerate(self.test_loader):
 				pos_image = pos_image.to(self.device)
-				pos_style_emb, pos_context_emb = self.image_encoder(pos_image)
+				pos_style_emb, _, pos_content_emb = self.image_encoder(pos_image)
 
 				'''
 				# The Closest Words from a Typography
