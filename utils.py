@@ -22,3 +22,9 @@ def features_to_sequence(features):
 	features = features.permute(0, 3, 1, 2)
 	features = features.squeeze(3)
 	return features
+
+def precision_at_k(pred, label, k=5):
+	batch_size = len(label)
+	acc_cnt = sum([l in pred[i,:k] for i, l in enumerate(label)])
+
+	return acc_cnt/batch_size
