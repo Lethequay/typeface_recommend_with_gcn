@@ -109,7 +109,7 @@ class Solver(object):
 
 
 				# Compute gradient penalty
-				loss = loss_triplet + slef.lambda_cls * loss_cls
+				loss = loss_triplet + self.lambda_cls * loss_cls
 
 				# Backprop + Optimize
 				self.reset_grad()
@@ -146,7 +146,7 @@ class Solver(object):
 					# (batch x z_dim), (batch x z_dim)
 					style_emb, cls_out, content_emb = self.image_encoder(image)
 
-					_, pred = torch.max(cls_out, 1)
+					_, pred = torch.sort(cls_out, 1, descending=True)
 					val_acc  += precision_at_k(pred.data.cpu().numpy(), typography)
 					val_loss += torch.mean((text_emb - style_emb) ** 2).item()
 

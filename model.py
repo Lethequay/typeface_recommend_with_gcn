@@ -48,7 +48,7 @@ class Text_Encoder(nn.Module):
 		unpacked, _ = rnn.pad_packed_sequence(model_out, batch_first=True)
 		unsorted_data = unsort_sequence(unpacked, idx_unsort)
 
-		transfered_data = self.transfer(unsorted_data[:,-1,:].unsqueeze(2))
+		transfered_data = self.transfer(unsorted_data[:,-1,:].unsqueeze(2)).squeeze(2)
 		return transfered_data
 
 #======================================================================================================#
@@ -61,20 +61,25 @@ class Image_Encoder(nn.Module):
 		self.embedding_dim = embedding_dim
 		self.image_size = image_size
 		self.num_typo = num_typo
-		self.kernel_sizes = range(5,20)
+		self.kernel_sizes = range(4,12)
 		self.style_convs = nn.ModuleList([nn.Sequential(
-						   nn.Conv2d(1, 10, kernel_size=i),
-						   nn.ReLU(inplace=True))
+						   nn.Conv2d(1, 2, kernel_size=i),
+						   nn.ReLU(inplace=True),
+						   nn.Conv2d(2, 4, kernel_size=i), # <-Padding
+						   nn.ReLU(inplace=True),
+						   nn.Conv2d(4, 8, kernel_size=i),
+						   nn.ReLU(inplace=True),
+						   )
 						   for i in self.kernel_sizes])
 		self.avgpools = nn.ModuleList([
-						nn.AvgPool2d((self.image_size[1]-i+1, self.image_size[0]-i+1))
+						nn.AvgPool2d((self.image_size[1]-3*(i-1), self.image_size[0]-3*(i-1)))
 						for i in self.kernel_sizes])
 		self.maxpools = nn.ModuleList([
-						nn.MaxPool2d((self.image_size[1]-i+1, self.image_size[0]-i+1))
+						nn.MaxPool2d((self.image_size[1]-3*(i-1), self.image_size[0]-3*(i-1)))
 						for i in self.kernel_sizes])
 
-		self.classifier = nn.Linear(self.embedding_dim, self.num_typo)
-		self.transfer = nn.Conv1d(self.embedding_dim, self.embedding_dim, 1)
+		self.classifier = nn.Linear(8*2*len(self.kernel_sizes), self.num_typo)
+		self.transfer = nn.Conv1d(8*2*len(self.kernel_sizes), self.embedding_dim, 1)
 
 		self.resnet18 =  getattr(models, 'resnet18')(pretrained=True)
 		self.resnet18.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3,
@@ -92,7 +97,7 @@ class Image_Encoder(nn.Module):
 								  batch_first=True, bidirectional=True)
 
 	def forward(self, input):
-		# input : (batch x channel(1) x h(196) x w(1104))
+		# input : (batch x channel(1) x h(32) x w(256))
 		#====================STYLE======================#
 		out_list = []
 		for i, k in enumerate(self.kernel_sizes):
@@ -102,9 +107,9 @@ class Image_Encoder(nn.Module):
 			avgpool_out = self.avgpools[i](conv_out)
 			out_list.append(maxpool_out.squeeze())
 			out_list.append(avgpool_out.squeeze())
-		# style_out : (batch x 300)
+		# style_out : (batch x 128)
 		style_out = torch.cat(out_list, 1)
-		trans_out = self.transfer(style_out.unsqueeze(2))
+		trans_out = self.transfer(style_out.unsqueeze(2)).squeeze(2)
 		cls_out = self.classifier(style_out)
 
 		#===================CONTENT=====================#
@@ -115,4 +120,6 @@ class Image_Encoder(nn.Module):
 		# (batch, 32, 300), (batch, 16, 150)
 		content_out,_ = self.content_rnn(seq_out)
 
+		# trans_out : (batch x 300)
+		# conv_out : (batch x 128 x 4 x 32)
 		return trans_out, cls_out, content_out[:,-1,:]
