@@ -18,7 +18,8 @@ class Solver(object):
 
 		# Models
 		self.text_encoder = None
-		self.image_encoder = None
+		#self.image_encoder = None
+		self.autoencoder = None
 
 		# Models hyper-parameters
 		self.image_size = config.image_size
@@ -53,20 +54,23 @@ class Solver(object):
 		self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 	def build_model(self):
+		self.autoencoder = AutoEncoder(self.num_typo, self.image_size)
 		self.text_encoder = Text_Encoder(self.word_dim, self.z_dim, self.text_maxlen)
-		self.image_encoder = Image_Encoder(self.z_dim, self.image_size, self.num_typo)
+		#self.image_encoder = Image_Encoder(self.z_dim, self.image_size, self.num_typo)
 		self.optimizer = optim.Adam(list(filter(lambda p: p.requires_grad, self.text_encoder.parameters())) + \
-									list(self.image_encoder.parameters()),
+									list(self.autoencoder.parameters()),
 									self.lr, [self.beta1, self.beta2])
 
 		if torch.cuda.is_available():
 			self.text_encoder.cuda()
-			self.image_encoder.cuda()
+			#self.image_encoder.cuda()
+			self.autoencoder.cuda()
 
 	def reset_grad(self):
 		"""Zero the gradient buffers."""
 		self.text_encoder.zero_grad()
-		self.image_encoder.zero_grad()
+		#self.image_encoder.zero_grad()
+		self.autoencoder.zero_grad()
 
 	def restore_model(self, resume_iters):
 		"""Restore the trained generator and discriminator."""
@@ -74,7 +78,7 @@ class Solver(object):
 		ie_path = os.path.join(self.model_path, 'image-encoder-%d.pkl' %(resume_iters))
 		if os.path.isfile(te_path) and os.path.isfile(ie_path):
 			self.text_encoder.load_state_dict(torch.load(te_path, map_location=lambda storage, loc: storage))
-			self.image_encoder.load_state_dict(torch.load(ie_path, map_location=lambda storage, loc: storage))
+			#self.image_encoder.load_state_dict(torch.load(ie_path, map_location=lambda storage, loc: storage))
 			print('te/se is Successfully Loaded from %d epoch'%resume_iters)
 			return resume_iters
 		else:
@@ -98,18 +102,20 @@ class Solver(object):
 				# (batch x z_dim)
 				text_emb  = self.text_encoder(text, text_len)
 				# (batch x z_dim), (batch x z_dim)
-				pos_style_emb, cls_out, pos_content_emb = self.image_encoder(pos_image)
-				neg_style_emb, _,       neg_content_emb = self.image_encoder(neg_image)
+				#pos_style_emb, out_cls, pos_content_emb = self.image_encoder(pos_image)
+				#neg_style_emb, _,       neg_content_emb = self.image_encoder(neg_image)
+				out_img, out_cls = self.autoencoder(pos_image)
 
-				_, pred = torch.sort(cls_out, 1, descending=True)
+				_, pred = torch.sort(out_cls, 1, descending=True)
 				acc  += precision_at_k(pred.data.cpu().numpy(), typography)
-				loss_triplet = F.triplet_margin_loss(text_emb, pos_style_emb, neg_style_emb, margin=1)
-				loss_cls = F.cross_entropy(cls_out, typography.to(self.device))
+				#loss_triplet = F.triplet_margin_loss(text_emb, pos_style_emb, neg_style_emb, margin=1)
+				loss_cls = F.cross_entropy(out_cls, typography.to(self.device))
+				loss_img = torch.mean(torch.abs(pos_image-out_img))
 				# GAN / OCR
 
 
 				# Compute gradient penalty
-				loss = loss_triplet + self.lambda_cls * loss_cls
+				loss = loss_img + self.lambda_cls * loss_cls
 
 				# Backprop + Optimize
 				self.reset_grad()
@@ -130,25 +136,29 @@ class Solver(object):
 			#==================================== Validation ====================================#
 			if (epoch+1) % self.val_step == 0:
 				self.text_encoder.train(False)
-				self.image_encoder.train(False)
+				#self.image_encoder.train(False)
+				self.autoencoder.train(False)
 				self.text_encoder.eval()
-				self.image_encoder.eval()
+				#self.image_encoder.eval()
+				self.autoencoder.eval()
 
 				val_loss = 0.
 				val_acc  = 0.
-				for i, (typography, pos_image,_, text, text_len) in enumerate(self.test_loader):
-					image = pos_image.to(self.device)
+				for i, (typography, image,_, text, text_len) in enumerate(self.test_loader):
+					image = image.to(self.device)
 					text = text.to(self.device)
 					text_len = text_len.to(self.device)
 
 					# (batch x z_dim)
 					text_emb  = self.text_encoder(text, text_len)
 					# (batch x z_dim), (batch x z_dim)
-					style_emb, cls_out, content_emb = self.image_encoder(image)
+					#style_emb, out_cls, content_emb = self.image_encoder(image)
+					out_img, out_cls = self.autoencoder(image)
 
-					_, pred = torch.sort(cls_out, 1, descending=True)
+					_, pred = torch.sort(out_cls, 1, descending=True)
 					val_acc  += precision_at_k(pred.data.cpu().numpy(), typography)
-					val_loss += torch.mean((text_emb - style_emb) ** 2).item()
+					#val_loss += torch.mean((text_emb - style_emb) ** 2).item()
+					val_loss += torch.mean(torch.abs(image - out_img))
 
 				print('Valid Loss: {:.4f}, Valid Precision@5: {:.4f}'\
 					  .format(val_loss/(i+1), val_acc/(i+1)))
@@ -156,10 +166,11 @@ class Solver(object):
 				te_path = os.path.join(self.model_path, 'text-encoder-%d.pkl' %(epoch+1))
 				ie_path = os.path.join(self.model_path, 'image-encoder-%d.pkl' %(epoch+1))
 				torch.save(self.text_encoder.state_dict(), te_path)
-				torch.save(self.image_encoder.state_dict(), ie_path)
+				#torch.save(self.image_encoder.state_dict(), ie_path)
 
 				self.text_encoder.train(True)
-				self.image_encoder.train(True)
+				#self.image_encoder.train(True)
+				self.autoencoder.train(True)
 
 	def sample(self):
 
@@ -176,7 +187,7 @@ class Solver(object):
 			from_word_vec = self.text_encoder.idx2vec(from_word)
 			for i, (typography, pos_image,_, text,_) in enumerate(self.test_loader):
 				pos_image = pos_image.to(self.device)
-				pos_style_emb, _, pos_content_emb = self.image_encoder(pos_image)
+				#pos_style_emb, _, pos_content_emb = self.image_encoder(pos_image)
 
 				# The Closest Words from a Typography
 				# (batch x 999994)

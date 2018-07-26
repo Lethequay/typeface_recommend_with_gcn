@@ -54,6 +54,52 @@ class Text_Encoder(nn.Module):
 #======================================================================================================#
 #======================================================================================================#
 
+# https://gist.github.com/okiriza
+class AutoEncoder(nn.Module):
+
+	def __init__(self, code_size, img_size):
+		super().__init__()
+		self.code_size = code_size
+		self.img_width = img_size[1]
+		self.img_height = img_size[0]
+
+		# Encoder specification
+		self.enc_cnn_1 = nn.Conv2d(1, 10, kernel_size=5)
+		self.enc_cnn_2 = nn.Conv2d(10, 20, kernel_size=5)
+		self.enc_linear_1 = nn.Linear(20 * 5 * 61, 1024)
+		self.enc_linear_2 = nn.Linear(1024, self.code_size)
+
+		# Decoder specification
+		self.dec_linear_1 = nn.Linear(self.code_size, 256)
+		self.dec_linear_2 = nn.Linear(256, self.img_width*self.img_height)
+
+		# Classifier
+		self.classifier = nn.Linear(self.code_size, self.code_size)
+
+	def forward(self, images):
+		code = self.encode(images)
+		out_cls = self.classifier(code)
+		out = self.decode(code)
+		return out, out_cls
+
+	def encode(self, images):
+		code = self.enc_cnn_1(images)
+		code = F.selu(F.max_pool2d(code, 2))
+
+		code = self.enc_cnn_2(code)
+		code = F.selu(F.max_pool2d(code, 2))
+
+		code = code.view([images.size(0), -1])
+		code = F.selu(self.enc_linear_1(code))
+		code = self.enc_linear_2(code)
+		return code
+
+	def decode(self, code):
+		out = F.selu(self.dec_linear_1(code))
+		out = F.sigmoid(self.dec_linear_2(out))
+		out = out.view([code.size(0), 1, self.img_width, self.img_height])
+		return out
+
 class Image_Encoder(nn.Module):
 	def __init__(self, embedding_dim, image_size, num_typo):
 		super(Image_Encoder, self).__init__()
@@ -61,21 +107,17 @@ class Image_Encoder(nn.Module):
 		self.embedding_dim = embedding_dim
 		self.image_size = image_size
 		self.num_typo = num_typo
-		self.kernel_sizes = range(4,12)
+		self.kernel_sizes = range(5,20)
 		self.style_convs = nn.ModuleList([nn.Sequential(
-						   nn.Conv2d(1, 2, kernel_size=i),
-						   nn.ReLU(inplace=True),
-						   nn.Conv2d(2, 4, kernel_size=i), # <-Padding
-						   nn.ReLU(inplace=True),
-						   nn.Conv2d(4, 8, kernel_size=i),
+						   nn.Conv2d(1, 10, kernel_size=i),
 						   nn.ReLU(inplace=True),
 						   )
 						   for i in self.kernel_sizes])
 		self.avgpools = nn.ModuleList([
-						nn.AvgPool2d((self.image_size[1]-3*(i-1), self.image_size[0]-3*(i-1)))
+						nn.AvgPool2d((self.image_size[1]-(i-1), self.image_size[0]-(i-1)))
 						for i in self.kernel_sizes])
 		self.maxpools = nn.ModuleList([
-						nn.MaxPool2d((self.image_size[1]-3*(i-1), self.image_size[0]-3*(i-1)))
+						nn.MaxPool2d((self.image_size[1]-(i-1), self.image_size[0]-(i-1)))
 						for i in self.kernel_sizes])
 
 		self.classifier = nn.Linear(8*2*len(self.kernel_sizes), self.num_typo)
