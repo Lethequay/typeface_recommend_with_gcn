@@ -23,8 +23,15 @@ def features_to_sequence(features):
 	features = features.squeeze(3)
 	return features
 
-def precision_at_k(pred, label, k=5):
+def accuracy_at_k(pred, label, k=5):
 	batch_size = len(label)
 	acc_cnt = sum([l in pred[i,:k] for i, l in enumerate(label)])
 
 	return acc_cnt/batch_size
+
+def baccuracy_at_k(pred, label, k=30):
+	label = torch.nonzero(label)
+	label_size = label.size(0)
+	acc_cnt = sum([j in pred[i,:k] for (i, j) in label])
+
+	return acc_cnt/label_size

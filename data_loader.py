@@ -18,13 +18,14 @@ class ImageFolder(data.Dataset):
 		self.data_arr = np.load(data_path)
 		shuffle(self.data_arr)
 
-		self.typo_dict = np.load('./data/typo_dict.npy').item()
-		self.typo_size = len(self.typo_dict)
+		self.idx2text = np.load('./data/idx2text.npy')
+		self.idx2typos = np.load('./data/idx2typos.npy')
+		self.typo_list = np.load('./data/typo_list.npy')
+		self.typo_cnt = len(self.typo_list)
 
 		self.image_size = image_size
 		self.image_path = image_path
 		self.image_paths = list(map(lambda x: os.path.join(image_path, x), os.listdir(image_path)))
-		self.dataidx2typos = np.load('./data/idx2typos.npy').item()
 
 		self.transform = transform
 		self.train_dataset = []
@@ -35,9 +36,9 @@ class ImageFolder(data.Dataset):
 			self.data_size = len(self.train_dataset)
 		else:
 			self.data_size = len(self.test_dataset)
-		print("typo count :", self.typo_size)
-		print("data count :", self.data_size)
+		print("typo count :", self.typo_cnt)
 		print("image count :", len(self.image_paths))
+		print("data count :", self.data_size)
 
 	def preprocess(self):
 		train_thr = int(len(self.data_arr) * 0.8)
@@ -53,24 +54,24 @@ class ImageFolder(data.Dataset):
 		tokens = data[index]
 		idx = int(tokens[0])
 		typography = tokens[1]
-		text = list(map(int, tokens[2:-1]))
+		typos= self.idx2typos[idx]
+		text = self.idx2text[idx]
+		length = int(text[-1])
+		text = text[:-1]
 		text = torch.from_numpy(np.asarray(text))
-		length = int(tokens[-1])
 
-		pos_image = Image.open(self.image_path+
-							   typography.replace(' ','_').replace('/','=')+'.png')\
-							   .convert("L")
-		neg_image = Image.open(random.choice([x for x in self.image_paths
-							   if x[len(self.image_path):-len('.png')] not in self.dataidx2typos[idx]]))\
-							   .convert("L")
+		pos_image = Image.open(self.image_path+str(typography)+'.png').convert("L")
+		neg_image = Image.open(self.image_path+str(random.choice([x for x in range(self.typo_cnt)
+										  if x not in typos]))+'.png').convert("L")
 		pos_image = pos_image.resize(self.image_size, Image.ANTIALIAS)
 		neg_image = neg_image.resize(self.image_size, Image.ANTIALIAS)
 		if self.transform is not None:
 			pos_image = self.transform(pos_image)
 			neg_image = self.transform(neg_image)
-		typography = self.typo_dict[typography]
+		text_typo_label = torch.from_numpy(np.asarray(
+						  [1 if i in typos else 0 for i in range(self.typo_cnt)]))
 
-		return typography, pos_image, neg_image, text, length
+		return typography, pos_image, neg_image, text, length, text_typo_label
 
 	def __len__(self):
 		"""Returns the total number of font files."""

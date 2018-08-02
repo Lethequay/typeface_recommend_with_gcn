@@ -11,20 +11,22 @@ from utils import *
 
 
 class Text_Encoder(nn.Module):
-	def __init__(self, word_dim=300, hidden_dim=512, text_maxlen=300):
+	def __init__(self, word_dim=300, hidden_dim=512, text_maxlen=300, cls_cnt=2349):
 		super(Text_Encoder, self).__init__()
 
 		self.embedding_dim = hidden_dim
 
-		ft_i2v = np.load('./data/word_emb/ft_i2v.npy')
-		self.idx2vec = nn.Embedding(ft_i2v.shape[0]+len(['unk','pad']),
+		i2v = np.load('./data/word_emb/gb_i2v.npy')
+		self.idx2vec = nn.Embedding(i2v.shape[0]+len(['unk','pad']),
 									embedding_dim=word_dim, padding_idx=1)
-		self.idx2vec.weight.data[2:].copy_(torch.from_numpy(ft_i2v))
+		self.idx2vec.weight.data[2:].copy_(torch.from_numpy(i2v))
 		self.idx2vec.weight.requires_grad = True
 		self.unk2vec = nn.Parameter(torch.randn(word_dim))
 
 		self.model = nn.LSTM(word_dim, hidden_dim//2, 2, bidirectional=True)
-		self.transfer = nn.Conv1d(hidden_dim, hidden_dim, 1)
+		#self.transfer = nn.Conv1d(hidden_dim, hidden_dim, 1)
+
+		self.classifier = nn.Linear(hidden_dim, cls_cnt)
 
 	def word_emb(self, text):
 		# input : (batch x length(300))
@@ -46,20 +48,20 @@ class Text_Encoder(nn.Module):
 		model_out, _ = self.model(packed)
 
 		unpacked, _ = rnn.pad_packed_sequence(model_out, batch_first=True)
-		unsorted_data = unsort_sequence(unpacked, idx_unsort)
+		unsorted_data = unsort_sequence(unpacked, idx_unsort)[:,-1,:]
 
-		transfered_data = self.transfer(unsorted_data[:,-1,:].unsqueeze(2)).squeeze(2)
-		return transfered_data
+		#transfered_data = self.transfer(unsorted_data[:,-1,:].unsqueeze(2)).squeeze(2)
+		out_cls = self.classifier(unsorted_data)
+		return unsorted_data, out_cls
 
 #======================================================================================================#
 #======================================================================================================#
 
 # https://gist.github.com/okiriza
 class AutoEncoder(nn.Module):
-
-	def __init__(self, code_size, img_size):
-		super().__init__()
-		self.code_size = code_size
+	def __init__(self, embedding_dim, num_typo, img_size):
+		super(AutoEncoder, self).__init__()
+		self.num_typo = num_typo
 		self.img_width = img_size[1]
 		self.img_height = img_size[0]
 
@@ -67,20 +69,19 @@ class AutoEncoder(nn.Module):
 		self.enc_cnn_1 = nn.Conv2d(1, 10, kernel_size=5)
 		self.enc_cnn_2 = nn.Conv2d(10, 20, kernel_size=5)
 		self.enc_linear_1 = nn.Linear(20 * 5 * 61, 1024)
-		self.enc_linear_2 = nn.Linear(1024, self.code_size)
+		self.enc_linear_21 = nn.Linear(1024, embedding_dim)
+		# Classifier
+		self.enc_linear_22 = nn.Linear(1024, self.num_typo)
 
 		# Decoder specification
-		self.dec_linear_1 = nn.Linear(self.code_size, 256)
+		self.dec_linear_1 = nn.Linear(embedding_dim, 256)
 		self.dec_linear_2 = nn.Linear(256, self.img_width*self.img_height)
 
-		# Classifier
-		self.classifier = nn.Linear(self.code_size, self.code_size)
 
 	def forward(self, images):
-		code = self.encode(images)
-		out_cls = self.classifier(code)
-		out = self.decode(code)
-		return out, out_cls
+		out_vec, out_cls = self.encode(images)
+		out_img = self.decode(out_vec)
+		return out_img, out_vec, out_cls
 
 	def encode(self, images):
 		code = self.enc_cnn_1(images)
@@ -91,8 +92,9 @@ class AutoEncoder(nn.Module):
 
 		code = code.view([images.size(0), -1])
 		code = F.selu(self.enc_linear_1(code))
-		code = self.enc_linear_2(code)
-		return code
+		out_vec = self.enc_linear_21(code)
+		out_cls = self.enc_linear_22(code)
+		return out_vec, out_cls
 
 	def decode(self, code):
 		out = F.selu(self.dec_linear_1(code))
@@ -100,8 +102,50 @@ class AutoEncoder(nn.Module):
 		out = out.view([code.size(0), 1, self.img_width, self.img_height])
 		return out
 
+
+class Resnet(nn.Module):
+	def __init__(self, embedding_dim, num_typo, img_size):
+		super(Resnet, self).__init__()
+		self.img_width = img_size[1]
+		self.img_height = img_size[0]
+
+		resnet18 =  getattr(models, 'resnet18')(pretrained=False)
+		resnet18.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3,
+										bias=False)
+
+		self.content_conv = nn.Sequential(
+										resnet18.conv1,
+										resnet18.bn1,
+										resnet18.relu,
+										resnet18.maxpool,
+										resnet18.layer1,
+										resnet18.layer2,
+										resnet18.layer3,
+										resnet18.layer4,
+										)
+		# [batch x 512 x 1 x 8]
+		self.projector = nn.Conv2d(512, embedding_dim, (1,8))
+		self.classifier = nn.Linear(512 * 8, num_typo)
+
+		# Decoder specification
+		self.dec_linear = nn.Sequential(
+										nn.Linear(512 * 8, self.img_width*self.img_height),
+										nn.Sigmoid()
+										)
+
+	def forward(self, image):
+		res_vec = self.content_conv(image)
+		out_vec = self.projector(res_vec).squeeze()
+		out_cls = self.classifier(res_vec.view(res_vec.size(0), -1))
+		out_img = self.dec_linear(res_vec.view(res_vec.size(0), -1))
+		out_img = out_img.view([image.size(0), 1, self.img_width, self.img_height])
+
+		return out_img, out_vec, out_cls
+
+
+'''
 class Image_Encoder(nn.Module):
-	def __init__(self, embedding_dim, image_size, num_typo):
+	def __init__(self, embedding_dim, num_typo, image_size):
 		super(Image_Encoder, self).__init__()
 
 		self.embedding_dim = embedding_dim
@@ -165,3 +209,4 @@ class Image_Encoder(nn.Module):
 		# trans_out : (batch x 300)
 		# conv_out : (batch x 128 x 4 x 32)
 		return trans_out, cls_out, content_out[:,-1,:]
+'''
