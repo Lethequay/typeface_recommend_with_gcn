@@ -63,6 +63,18 @@ class Solver(object):
 		if torch.cuda.is_available():
 			self.text_encoder.cuda()
 			self.image_encoder.cuda()
+		self.print_network(self.text_encoder, 'TE')
+		self.print_network(self.image_encoder, 'IE')
+
+	def print_network(self, model, name):
+		"""Print out the network information."""
+		num_params = 0
+		for p in model.parameters():
+			num_params += p.numel()
+		print(model)
+		print(name)
+		print("The number of parameters: {}".format(num_params))
+
 
 	def reset_grad(self):
 		"""Zero the gradient buffers."""
