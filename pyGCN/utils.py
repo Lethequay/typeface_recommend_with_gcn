@@ -104,6 +104,7 @@ def accuracy_at_k(pred, label, k=5):
 	return acc_cnt/batch_size
 
 def baccuracy_at_k(pred, label, k=30):
+	_, pred  = torch.sort(pred, 1, descending=True)
 	label = torch.nonzero(label)
 	label_size = label.size(0)
 	acc_cnt = sum([j in pred[i,:k] for (i, j) in label])

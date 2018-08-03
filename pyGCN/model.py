@@ -1,8 +1,11 @@
+import numpy as np
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
+import torch.nn.utils.rnn as rnn
 from torchvision import models
 from layers import GraphConvolution
+from utils import *
 
 
 class GCN(nn.Module):
@@ -28,7 +31,7 @@ class Text_Encoder(nn.Module):
 
 		self.embedding_dim = hidden_dim
 
-		i2v = np.load('./data/word_emb/gb_i2v.npy')
+		i2v = np.load('../data/word_emb/gb_i2v.npy')
 		self.idx2vec = nn.Embedding(i2v.shape[0]+len(['unk','pad']),
 									embedding_dim=word_dim, padding_idx=1)
 		self.idx2vec.weight.data[2:].copy_(torch.from_numpy(i2v))
