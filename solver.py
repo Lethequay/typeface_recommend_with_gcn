@@ -7,6 +7,7 @@ import torchvision
 from torch import optim
 from torch.autograd import Variable
 import torch.nn.functional as F
+from data_loader import img_loader
 from model import *
 
 class Solver(object):
@@ -15,6 +16,7 @@ class Solver(object):
 		# Data loader
 		self.train_loader = train_loader
 		self.test_loader = test_loader
+		self.image_loader = img_loader(config.img_path, config.image_size, config.batch_size)
 
 		# Models
 		self.text_encoder = None
@@ -63,8 +65,8 @@ class Solver(object):
 		if torch.cuda.is_available():
 			self.text_encoder.cuda()
 			self.image_encoder.cuda()
-		self.print_network(self.text_encoder, 'TE')
-		self.print_network(self.image_encoder, 'IE')
+		#self.print_network(self.text_encoder, 'TE')
+		#self.print_network(self.image_encoder, 'IE')
 
 	def print_network(self, model, name):
 		"""Print out the network information."""
@@ -92,6 +94,21 @@ class Solver(object):
 			return resume_iters
 		else:
 			return 0
+
+	def sim_score(self, text_emb, text_typo_label):
+		with torch.no_grad():
+			features = []
+			for i, (label, image) in enumerate(self.image_loader):
+				image = Variable(image).cuda()
+				_, style_emb, _ = self.image_encoder(image)
+				features.append(style_emb)
+			features = torch.cat(features, 0)
+
+			text_sim = torch.mm(text_emb, features.t())
+			_, sort_idx = torch.sort(text_sim)
+			mat_cnt = sum([j in sort_idx[i,:30] for (i,j) in torch.nonzero(text_typo_label)])
+			sim_score_ = (mat_cnt/len(torch.nonzero(text_typo_label)))
+			print("Sim Score@30: {:.4f} ".format(sim_score_), end='')
 
 
 	def train(self):
@@ -133,9 +150,6 @@ class Solver(object):
 				_, pred  = torch.sort(out_cls, 1, descending=True)
 				img_acc += accuracy_at_k(pred.data.cpu().numpy(), typography)
 
-				# GAN / OCR
-
-
 				# Compute gradient penalty
 				total_loss = loss_text_cls + loss_triplet + loss_img_cls# + loss_img_l1
 
@@ -160,6 +174,7 @@ class Solver(object):
 					log += ", text prec@30: {:.4f}".format(text_acc/(i+1))
 					log += ", image prec@5: {:.4f}".format(img_acc/(i+1))
 
+					self.sim_score(text_emb, text_typo_label)
 					for tag, value in loss.items():
 						log += ", {}: {:.4f}".format(tag, value)
 					print(log)
@@ -194,6 +209,7 @@ class Solver(object):
 					_, pred  = torch.sort(out_cls, 1, descending=True)
 					img_acc += accuracy_at_k(pred.data.cpu().numpy(), typography)
 
+				self.sim_score(text_emb, text_typo_label)
 				print('Val Loss: {:.4f}, Text Acc@30: {:.4f}, Image Acc@5: {:.4f}'\
 					  .format(val_loss/(i+1), text_acc/(i+1), img_acc/(i+1)))
 

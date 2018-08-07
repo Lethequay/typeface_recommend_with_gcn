@@ -10,7 +10,7 @@ from torch.utils import data
 from torchvision import transforms
 from PIL import Image, ImageOps, ImageFont, ImageDraw
 
-class ImageFolder(data.Dataset):
+class DataFolder(data.Dataset):
 	"""Load Variaty Chinese Fonts for Iterator. """
 	def __init__(self, mode, data_path, image_path, image_size, transform=None):
 		"""Initializes image paths and preprocessing module."""
@@ -85,9 +85,50 @@ def get_loader(mode, data_path, image_path, image_size, batch_size, num_workers=
 					transforms.ToTensor(),
 					transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
-	dataset = ImageFolder(mode, data_path, image_path, image_size, transform)
+	dataset = DataFolder(mode, data_path, image_path, image_size, transform)
 	data_loader = data.DataLoader(dataset=dataset,
 								  batch_size=batch_size,
 								  shuffle=True,
+								  num_workers=num_workers)
+	return data_loader
+
+#======================================================================================================#
+#======================================================================================================#
+
+class ImageLoader(data.Dataset):
+	"""Load Variaty Chinese Fonts for Iterator."""
+	def __init__(self, image_path, image_size, transform=None):
+		"""Initializes image paths and preprocessing module."""
+
+		self.image_size = image_size
+		self.image_path = image_path
+		self.image_paths = list(map(lambda x: os.path.join(image_path, x), os.listdir(image_path)))
+
+		self.transform = transform
+
+	def __getitem__(self, index):
+		"""Reads an image from a file and preprocesses it and returns."""
+		image = Image.open(self.image_path+str(index)+'.png').convert("L")
+		image = image.resize(self.image_size, Image.ANTIALIAS)
+		if self.transform is not None:
+			image = self.transform(image)
+
+		return index, image
+
+	def __len__(self):
+		"""Returns the total number of font files."""
+		return len(self.image_paths)
+
+def img_loader(image_path, image_size, batch_size, num_workers=2):
+	"""Builds and returns Dataloader."""
+
+	transform = transforms.Compose([
+					transforms.ToTensor(),
+					transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+
+	dataset = ImageLoader(image_path, image_size, transform)
+	data_loader = data.DataLoader(dataset=dataset,
+								  batch_size=batch_size,
+								  shuffle=False,
 								  num_workers=num_workers)
 	return data_loader

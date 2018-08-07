@@ -45,16 +45,16 @@ if __name__ == '__main__':
 	parser.add_argument('--word_dim', type=int, default=300)
 	parser.add_argument('--z_dim', type=int, default=300)
 	parser.add_argument('--text_maxlen', type=int, default=300)
-	parser.add_argument('--num_typo', type=int , default=2349)
+	parser.add_argument('--num_typo', type=int, default=2349)
 
 	# training hyper-parameters
-	parser.add_argument('--sample_epochs', type=int, default=100)
+	parser.add_argument('--sample_epochs', type=int, default=50)
 	parser.add_argument('--start_epochs', type=int, default=0)
 	parser.add_argument('--num_epochs', type=int, default=100)
 	parser.add_argument('--num_epochs_decay', type=int, default=50)
 	parser.add_argument('--batch_size', type=int, default=32)
 	parser.add_argument('--num_workers', type=int, default=8)
-	parser.add_argument('--lr', type=float, default=0.0001)
+	parser.add_argument('--lr', type=float, default=1e-3)
 	parser.add_argument('--lambda_cls', type=float, default=10)
 	parser.add_argument('--beta1', type=float, default=0.5)		# momentum1 in Adam
 	parser.add_argument('--beta2', type=float, default=0.999)	  # momentum2 in Adam
