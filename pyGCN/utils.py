@@ -7,17 +7,10 @@ from torchvision import transforms
 from PIL import Image, ImageOps, ImageFont, ImageDraw
 
 
-class ImageFolder(data.Dataset):
+class ImageLoader(data.Dataset):
 	"""Load Variaty Chinese Fonts for Iterator."""
-	def __init__(self, data_path, image_path, image_size, transform=None):
+	def __init__(self, image_path, image_size, transform=None):
 		"""Initializes image paths and preprocessing module."""
-		#self.data_arr = np.load(data_path)
-		#shuffle(self.data_arr)
-
-		#self.idx2text = np.load('./data/idx2text.npy')
-		#self.idx2typos = np.load('./data/idx2typos.npy')
-		#self.typo_list = np.load('./data/typo_list.npy')
-		#self.typo_cnt = len(self.typo_list)
 
 		self.image_size = image_size
 		self.image_path = image_path
@@ -38,14 +31,52 @@ class ImageFolder(data.Dataset):
 		"""Returns the total number of font files."""
 		return len(self.image_paths)
 
-def get_loader(data_path, image_path, image_size, batch_size, num_workers=2):
+def img_loader(image_path, image_size, batch_size, num_workers=2):
 	"""Builds and returns Dataloader."""
 
 	transform = transforms.Compose([
 					transforms.ToTensor(),
 					transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
-	dataset = ImageFolder(data_path, image_path, image_size, transform)
+	dataset = ImageLoader(image_path, image_size, transform)
+	data_loader = data.DataLoader(dataset=dataset,
+								  batch_size=batch_size,
+								  shuffle=False,
+								  num_workers=num_workers)
+	return data_loader
+
+#======================================================================================================#
+#======================================================================================================#
+
+class TextLoader(data.Dataset):
+	"""Load Variaty Chinese Fonts for Iterator."""
+	def __init__(self):
+		"""Initializes image paths and preprocessing module."""
+		self.idx2text = np.load('../data/idx2text.npy')
+		self.idx2typos = np.load('../data/idx2typos.npy')
+		typo_list = np.load('../data/typo_list.npy')
+		self.typo_cnt = len(typo_list)
+
+	def __getitem__(self, index):
+		"""Reads an image from a file and preprocesses it and returns."""
+		text = self.idx2text[index]
+		typos= self.idx2typos[index]
+		length = int(text[-1])
+		text = text[:-1]
+		text = torch.from_numpy(np.asarray(text))
+		text_typo_label = torch.from_numpy(np.asarray(
+						  [1 if i in typos else 0 for i in range(self.typo_cnt)]))
+
+		return index, text, length, text_typo_label
+
+	def __len__(self):
+		"""Returns the total number of font files."""
+		return len(self.idx2text)
+
+def text_loader(batch_size, num_workers=2):
+	"""Builds and returns Dataloader."""
+
+	dataset = TextLoader()
 	data_loader = data.DataLoader(dataset=dataset,
 								  batch_size=batch_size,
 								  shuffle=False,
@@ -60,7 +91,13 @@ def normalize(mx):
     r_inv = torch.pow(rowsum, -0.5).view(-1)
     #r_inv[torch.isinf(r_inv)] = 0.
     r_mat_inv = torch.diag(r_inv)
-    mx = r_mat_inv.mm(mx).t().mm(r_mat_inv)
+    mx = r_mat_inv.mm(mx.t()).mm(r_mat_inv.t())
+
+    # T
+    r_inv = torch.pow(rowsum, -1).view(-1)
+    #r_inv[torch.isinf(r_inv)] = 0.
+    r_mat_inv = torch.diag(r_inv)
+    mx = mx.mm(r_mat_inv.t()).mm(mx.t())
     return mx
 
 
@@ -84,9 +121,14 @@ def sort_sequence(data, len_data):
 
 	return sorted_data, sorted_len.data.cpu().numpy(), idx_unsort
 
-def unsort_sequence(data, idx_unsort):
-	unsorted_data = data.index_select(0, idx_unsort)
-	return unsorted_data
+def unsort_sequence(data, idx_unsort, len_data):
+	idxes = zip(idx_unsort, len_data)
+	unsort_data = []
+	for (batch, len) in idxes:
+		unsort_data.append(data[(batch, len-1)])
+	unsort_data = torch.stack(unsort_data, 0)
+
+	return unsort_data
 
 def features_to_sequence(features):
 	b, c, h, w = features.size()

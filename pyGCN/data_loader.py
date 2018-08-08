@@ -20,8 +20,8 @@ class ImageFolder(data.Dataset):
 
 		self.idx2text = np.load('../data/idx2text.npy')
 		self.idx2typos = np.load('../data/idx2typos.npy')
-		self.typo_list = np.load('../data/typo_list.npy')
-		self.typo_cnt = len(self.typo_list)
+		typo_list = np.load('../data/typo_list.npy')
+		self.typo_cnt = len(typo_list)
 
 		self.image_size = image_size
 		self.image_path = image_path
@@ -37,7 +37,7 @@ class ImageFolder(data.Dataset):
 		else:
 			self.data_size = len(self.test_dataset)
 		print("typo count :", self.typo_cnt)
-		print("image count :", len(self.image_paths))
+		print("text count :", len(self.image_paths))
 		print("data count :", self.data_size)
 
 	def preprocess(self):

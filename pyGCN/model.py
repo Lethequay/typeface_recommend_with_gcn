@@ -13,14 +13,18 @@ class GCN(nn.Module):
         super(GCN, self).__init__()
 
         self.gc1 = GraphConvolution(nfeat, nhid)
-        self.gc2 = GraphConvolution(nhid, nclass)
+        self.gc2 = GraphConvolution(nhid, nfeat)
+        self.classifier = nn.Linear(nfeat, nclass)
         self.dropout = dropout
 
     def forward(self, x, adj):
         x = F.relu(self.gc1(x, adj))
         x = F.dropout(x, self.dropout, training=self.training)
         x = self.gc2(x, adj)
-        return F.log_softmax(x, 0)
+        text_cls = self.classifier(x[:4576])
+        img_cls  = self.classifier(x[4576:])
+
+        return F.log_softmax(x, 0), text_cls, img_cls
 
 #======================================================================================================#
 #======================================================================================================#
@@ -38,7 +42,7 @@ class Text_Encoder(nn.Module):
 		self.idx2vec.weight.requires_grad = True
 		self.unk2vec = nn.Parameter(torch.randn(word_dim))
 
-		self.model = nn.LSTM(word_dim, hidden_dim//2, 2, bidirectional=True)
+		self.model = nn.LSTM(word_dim, hidden_dim//2, 2, bidirectional=True, batch_first=True)
 		#self.transfer = nn.Conv1d(hidden_dim, hidden_dim, 1)
 
 		self.classifier = nn.Linear(hidden_dim, cls_cnt)
@@ -50,12 +54,12 @@ class Text_Encoder(nn.Module):
 		for (r,c) in unks:
 			text_emb[r,c]=self.unk2vec
 
-		# text_emb : (batch x channels(300) x length(300))
 		return text_emb
 
 	def forward(self, input, input_len):
 		# input : (batch x length(300))
 		input = self.idx2vec(input)
+		# input : (batch x length(300) x dim(300))
 
 		sorted_data, sorted_len, idx_unsort = sort_sequence(input, input_len)
 		packed = rnn.pack_padded_sequence(sorted_data, sorted_len, batch_first=True)
@@ -63,9 +67,9 @@ class Text_Encoder(nn.Module):
 		model_out, _ = self.model(packed)
 
 		unpacked, _ = rnn.pad_packed_sequence(model_out, batch_first=True)
-		unsorted_data = unsort_sequence(unpacked, idx_unsort)[:,-1,:]
+		unsorted_data = unsort_sequence(unpacked, idx_unsort, input_len)
 
-		#transfered_data = self.transfer(unsorted_data[:,-1,:].unsqueeze(2)).squeeze(2)
+		#transfered_data = self.transfer(unsorted_data.unsqueeze(2)).squeeze(2)
 		out_cls = self.classifier(unsorted_data)
 		return unsorted_data, out_cls
 

@@ -14,7 +14,7 @@ import glob
 from torch.autograd import Variable
 
 from utils import *
-from models import *
+from model import *
 
 # Training settings
 parser = argparse.ArgumentParser()
@@ -36,16 +36,16 @@ parser.add_argument('--text_maxlen', type=int, default=300)
 parser.add_argument('--num_typo', type=int, default=2349)
 
 # training hyper-parameters
-parser.add_argument('--sample_epochs', type=int, default=50)
+parser.add_argument('--sample_epochs', type=int, default=0)
 parser.add_argument('--start_epochs', type=int, default=0)
 parser.add_argument('--num_epochs', type=int, default=100)
 parser.add_argument('--num_epochs_decay', type=int, default=50)
 parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--num_workers', type=int, default=8)
-parser.add_argument('--lr', type=float, default=5e-3)
+parser.add_argument('--lr', type=float, default=1e-3)
 parser.add_argument('--lambda_cls', type=float, default=10)
-parser.add_argument('--beta1', type=float, default=0.5)		# momentum1 in Adam
-parser.add_argument('--beta2', type=float, default=0.999)	  # momentum2 in Adam
+parser.add_argument('--beta1', type=float, default=0.5)        # momentum1 in Adam
+parser.add_argument('--beta2', type=float, default=0.999)      # momentum2 in Adam
 parser.add_argument('--weight_decay', type=float, default=5e-4, help='Weight decay (L2 loss on parameters).')
 
 # misc
@@ -55,12 +55,13 @@ parser.add_argument('--sample_path', type=str, default='./samples')
 parser.add_argument('--result_path', type=str, default='./results')
 parser.add_argument('--data_path', type=str, default='../data/fiu_indexed.npy')
 parser.add_argument('--img_path', type=str, default='../data/idx_png/')
-parser.add_argument('--adj_path', type=str, default='../data/matrix/typo2typo_mat.npy')
+parser.add_argument('--adj_path', type=str, default='../data/matrix/text_typo_mat.npy')
 parser.add_argument('--log_step', type=int , default=300)
 parser.add_argument('--val_step', type=int , default=5)
 
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
+args.device = torch.device('cuda' if args.cuda else 'cpu')
 
 random.seed(args.seed)
 np.random.seed(args.seed)
@@ -70,74 +71,111 @@ if args.cuda:
 
 # Load data
 adj = torch.from_numpy(np.load(args.adj_path)).type(torch.FloatTensor)
-data_loader = get_loader(args.data_path, args.img_path, args.image_size, args.batch_size)
-idx_train = range(int(len(data_loader)*0.8))
-idx_val   = range(int(len(data_loader)*0.8), len(data_loader))
+text_loader_ = text_loader(args.batch_size)
+image_loader = img_loader(args.img_path, args.image_size, args.batch_size)
 
 # Model and optimizer
 joint_model = GCN(nfeat=args.z_dim, nhid=args.z_dim//2, nclass=int(args.num_typo), dropout=args.dropout)
-#text_encoder = Text_Encoder(args.word_dim, args.z_dim, args.text_maxlen)
+text_model = Text_Encoder(args.word_dim, args.z_dim, args.text_maxlen)
 image_model = Resnet(args.z_dim, args.num_typo, args.image_size)
-#optimizer = optim.Adam(list(filter(lambda p: p.requires_grad, text_encoder.parameters())) + \
-optimizer = optim.Adam(list(joint_model.parameters()) + list(image_model.parameters()),
+optimizer = optim.Adam(list(text_model.parameters()) + list(image_model.parameters())\
+                       + list(joint_model.parameters()),
                        args.lr, [args.beta1, args.beta2], weight_decay=args.weight_decay)
 
+adj = normalize(adj + torch.eye(adj.shape[0]))
 if args.cuda:
     joint_model.cuda()
+    text_model.cuda()
     image_model.cuda()
-adj = normalize(adj + torch.eye(adj.shape[0]))
-adj = Variable(adj).type(torch.cuda.FloatTensor)
+    adj = Variable(adj).type(torch.cuda.FloatTensor)
+else:
+    adj = Variable(adj).type(torch.FloatTensor)
 
-print_network(joint_model, 'JM')
-print_network(image_model, 'IM')
+#print_network(joint_model, 'JM')
+#print_network(text_model, 'TM')
+#print_network(image_model, 'IM')
 
 
 def train(epoch):
 
     t = time.time()
     joint_model.train()
+    text_model.train()
     image_model.train()
-    optimizer.zero_grad()
+
+    # Text Embedding
+    text_feat = []
+    text_typo_list = []
+    for i, text, text_len, text_typo_label  in text_loader_:
+        text = text.to(args.device)
+        text_len = text_len.to(args.device)
+        text_typo_label = text_typo_label
+
+        text_emb, text_cls = text_model(text, text_len)
+        text_feat.append(text_emb)
+        text_typo_list.append(text_typo_label)
+    text_feat = torch.cat(text_feat, 0)
+    text_typo_list = torch.cat(text_typo_list, 0).type(torch.FloatTensor).to(args.device)
 
     # Image Embedding
-    features = []
-    labels = []
-    for i, (label, image) in enumerate(data_loader):
-        image = Variable(image).cuda()
-        label = Variable(label).cuda()
+    img_feat = []
+    img_label = []
+    for label, image in image_loader:
+        label = Variable(label).to(args.device)
+        image = Variable(image).to(args.device)
+        _, style_emb, style_cls = image_model(image)
+        img_feat.append(style_emb)
+        img_label.append(label)
+    img_feat = torch.cat(img_feat, 0)
+    img_label = torch.cat(img_label, 0)
 
-        _, style_emb, _ = image_model(image)
-        features.append(style_emb)
-        labels.append(label)
-    features = torch.cat(features, 0)
-    labels = torch.cat(labels, 0)
+    text_cnt = text_feat.size(0)
+    img_cnt  = img_feat.size(0)
+    text_train = range(int(text_cnt*0.8))
+    text_val   = range(int(text_cnt*0.8), text_cnt)
+    img_train = range(int(img_cnt*0.8))
+    img_val   = range(int(img_cnt*0.8), img_cnt)
 
-    output = joint_model(features, adj)
-    loss_train = F.cross_entropy(output[idx_train], labels[idx_train])
-    acc_train = accuracy_at_k(output[idx_train], labels[idx_train])
+    # Joint Embedding
+    output, text_cls, img_cls = joint_model(torch.cat((text_feat, img_feat), 0), adj)
+
+    # Vector Similarity
+    vec_sim = torch.mm(output[range(text_cnt)], output[range(text_cnt,text_cnt+img_cnt)].t())
+    _, sort_idx = torch.sort(vec_sim, 1, descending=True)
+    mat_cnt = sum([j in sort_idx[i,:30] for (i,j) in torch.nonzero(text_typo_list[text_train])])
+    sim_score_ = (mat_cnt/len(torch.nonzero(text_typo_list[text_train])))
+    print("Sim Score@30: {:.4f} ".format(sim_score_), end='')
+
+    # Loss & Acc.
+    loss_train = F.binary_cross_entropy_with_logits(text_cls[text_train], text_typo_list[text_train])
+    acc_text = baccuracy_at_k(text_cls[text_train], text_typo_list[text_train])
+    loss_train+= F.cross_entropy(img_cls, img_label)
+    acc_img = accuracy_at_k(img_cls, img_label)
+
+    optimizer.zero_grad()
     loss_train.backward()
     optimizer.step()
 
-    if not args.fastmode:
-        # Evaluate validation set performance separately,
-        # deactivates dropout during validation run.
-        joint_model.eval()
-        output = joint_model(features, adj)
-
-    loss_val = F.cross_entropy(output[idx_val], labels[idx_val])
-    acc_val = accuracy_at_k(output[idx_val], labels[idx_val])
-    print('Epoch: {:04d}'.format(epoch+1),
-          'loss_train: {:.4f}'.format(loss_train.item()),
-          'acc_train: {:.4f}'.format(acc_train),
-          'loss_val: {:.4f}'.format(loss_val.item()),
-          'acc@5_val: {:.4f}'.format(acc_val),
-          'time: {:.4f}s'.format(time.time() - t))
+    joint_model.eval()
+    text_model.eval()
+    image_model.eval()
+    with torch.no_grad():
+        loss_val = F.binary_cross_entropy_with_logits(text_cls[text_val], text_typo_list[text_val])
+        acc_text_val = baccuracy_at_k(text_cls[text_val], text_typo_list[text_val])
+        print('Epoch: {:04d}'.format(epoch+1),
+              'loss_train: {:.4f}'.format(loss_train.item()),
+              'text_acc_train: {:.4f}'.format(acc_text),
+              'img_acc_train: {:.4f}'.format(acc_img),
+              'loss_val: {:.4f}'.format(loss_val.item()),
+              'text_acc_val: {:.4f}'.format(acc_text_val),
+              'time: {:.4f}s'.format(time.time() - t))
 
     return loss_val.item()
 
 
 def compute_test():
     joint_model.eval()
+    text_model.eval()
     image_model.eval()
     output = model(features, adj)
     loss_test = F.cross_entropy(output[idx_test], labels[idx_test])
@@ -147,17 +185,24 @@ def compute_test():
           "accuracy= {:.4f}".format(acc_test.data[0]))
 
 
+if args.sample_epochs:
+    print('Loading {}th epoch'.format(args.sample_epochs))
+    joint_model.load_state_dict(torch.load(args.model_path+'/jm-{}.pkl'.format(args.sample_epochs)))
+    text_model.load_state_dict(torch.load(args.model_path+'/tm-{}.pkl'.format(args.sample_epochs)))
+    image_model.load_state_dict(torch.load(args.model_path+'/im-{}.pkl'.format(args.sample_epochs)))
+
 # Train model
 t_total = time.time()
 loss_values = []
 bad_counter = 0
 best = args.epochs + 1
 best_epoch = 0
-for epoch in range(args.epochs):
+for epoch in range(args.sample_epochs, args.epochs):
     loss_values.append(train(epoch))
 
     if loss_values[-1] < best:
         torch.save(joint_model.state_dict(), args.model_path+'/jm-{}.pkl'.format(epoch))
+        torch.save(text_model.state_dict(), args.model_path+'/tm-{}.pkl'.format(epoch))
         torch.save(image_model.state_dict(), args.model_path+'/im-{}.pkl'.format(epoch))
 
         best = loss_values[-1]
@@ -181,8 +226,9 @@ print("Total time elapsed: {:.4f}s".format(time.time() - t_total))
 
 # Restore best model
 print('Loading {}th epoch'.format(best_epoch))
-joint_model.load_state_dict(torch.load(args.models_paht+'/jm-{}.pkl'.format(best_epoch)))
-image_model.load_state_dict(torch.load(args.models_paht+'/im-{}.pkl'.format(best_epoch)))
+joint_model.load_state_dict(torch.load(args.model_path+'/jm-{}.pkl'.format(best_epoch)))
+text_model.load_state_dict(torch.load(args.model_path+'/tm-{}.pkl'.format(best_epoch)))
+image_model.load_state_dict(torch.load(args.model_path+'/im-{}.pkl'.format(best_epoch)))
 
 # Testing
 compute_test()
