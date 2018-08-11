@@ -20,8 +20,8 @@ class DataFolder(data.Dataset):
 
 		self.idx2text = np.load('./data/idx2text.npy')
 		self.idx2typos = np.load('./data/idx2typos.npy')
-		self.typo_list = np.load('./data/typo_list.npy')
-		self.typo_cnt = len(self.typo_list)
+		typo_list = np.load('./data/typo_list.npy')
+		self.typo_cnt = len(typo_list)
 
 		self.image_size = image_size
 		self.image_path = image_path
@@ -127,6 +127,44 @@ def img_loader(image_path, image_size, batch_size, num_workers=2):
 					transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
 	dataset = ImageLoader(image_path, image_size, transform)
+	data_loader = data.DataLoader(dataset=dataset,
+								  batch_size=batch_size,
+								  shuffle=False,
+								  num_workers=num_workers)
+	return data_loader
+
+#======================================================================================================#
+#======================================================================================================#
+
+class TextLoader(data.Dataset):
+	"""Load Variaty Chinese Fonts for Iterator."""
+	def __init__(self):
+		"""Initializes image paths and preprocessing module."""
+		self.idx2text = np.load('./data/idx2text.npy')
+		self.idx2typos = np.load('./data/idx2typos.npy')
+		typo_list = np.load('./data/typo_list.npy')
+		self.typo_cnt = len(typo_list)
+
+	def __getitem__(self, index):
+		"""Reads an image from a file and preprocesses it and returns."""
+		text = self.idx2text[index]
+		typos= self.idx2typos[index]
+		length = int(text[-1])
+		text = text[:-1]
+		text = torch.from_numpy(np.asarray(text))
+		text_typo_label = torch.from_numpy(np.asarray(
+						  [1 if i in typos else 0 for i in range(self.typo_cnt)]))
+
+		return index, text, length, text_typo_label
+
+	def __len__(self):
+		"""Returns the total number of font files."""
+		return len(self.idx2text)
+
+def text_loader(batch_size, num_workers=2):
+	"""Builds and returns Dataloader."""
+
+	dataset = TextLoader()
 	data_loader = data.DataLoader(dataset=dataset,
 								  batch_size=batch_size,
 								  shuffle=False,

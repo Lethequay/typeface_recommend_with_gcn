@@ -11,9 +11,14 @@ def sort_sequence(data, len_data):
 
 	return sorted_data, sorted_len.data.cpu().numpy(), idx_unsort
 
-def unsort_sequence(data, idx_unsort):
-	unsorted_data = data.index_select(0, idx_unsort)
-	return unsorted_data
+def unsort_sequence(data, idx_unsort, len_data):
+	idxes = zip(idx_unsort, len_data)
+	unsort_data = []
+	for (batch, len) in idxes:
+		unsort_data.append(data[(batch, len-1)])
+	unsort_data = torch.stack(unsort_data, 0)
+
+	return unsort_data
 
 def features_to_sequence(features):
 	b, c, h, w = features.size()

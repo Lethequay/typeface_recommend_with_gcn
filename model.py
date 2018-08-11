@@ -23,7 +23,7 @@ class Text_Encoder(nn.Module):
 		self.idx2vec.weight.requires_grad = True
 		self.unk2vec = nn.Parameter(torch.randn(word_dim))
 
-		self.model = nn.LSTM(word_dim, hidden_dim//2, 2, bidirectional=True)
+		self.model = nn.LSTM(word_dim, hidden_dim//2, 2, bidirectional=True, batch_first=True)
 		#self.transfer = nn.Conv1d(hidden_dim, hidden_dim, 1)
 
 		self.classifier = nn.Linear(hidden_dim, cls_cnt)
@@ -35,12 +35,12 @@ class Text_Encoder(nn.Module):
 		for (r,c) in unks:
 			text_emb[r,c]=self.unk2vec
 
-		# text_emb : (batch x channels(300) x length(300))
 		return text_emb
 
 	def forward(self, input, input_len):
 		# input : (batch x length(300))
 		input = self.idx2vec(input)
+		# input : (batch x length(300) x dim(300))
 
 		sorted_data, sorted_len, idx_unsort = sort_sequence(input, input_len)
 		packed = rnn.pack_padded_sequence(sorted_data, sorted_len, batch_first=True)
@@ -48,60 +48,14 @@ class Text_Encoder(nn.Module):
 		model_out, _ = self.model(packed)
 
 		unpacked, _ = rnn.pad_packed_sequence(model_out, batch_first=True)
-		unsorted_data = unsort_sequence(unpacked, idx_unsort)[:,-1,:]
+		unsorted_data = unsort_sequence(unpacked, idx_unsort, input_len)
 
-		#transfered_data = self.transfer(unsorted_data[:,-1,:].unsqueeze(2)).squeeze(2)
+		#transfered_data = self.transfer(unsorted_data.unsqueeze(2)).squeeze(2)
 		out_cls = self.classifier(unsorted_data)
 		return unsorted_data, out_cls
 
 #======================================================================================================#
 #======================================================================================================#
-
-# https://gist.github.com/okiriza
-class AutoEncoder(nn.Module):
-	def __init__(self, embedding_dim, num_typo, img_size):
-		super(AutoEncoder, self).__init__()
-		self.num_typo = num_typo
-		self.img_width = img_size[1]
-		self.img_height = img_size[0]
-
-		# Encoder specification
-		self.enc_cnn_1 = nn.Conv2d(1, 10, kernel_size=5)
-		self.enc_cnn_2 = nn.Conv2d(10, 20, kernel_size=5)
-		self.enc_linear_1 = nn.Linear(20 * 5 * 61, 1024)
-		self.enc_linear_21 = nn.Linear(1024, embedding_dim)
-		# Classifier
-		self.enc_linear_22 = nn.Linear(1024, self.num_typo)
-
-		# Decoder specification
-		self.dec_linear_1 = nn.Linear(embedding_dim, 256)
-		self.dec_linear_2 = nn.Linear(256, self.img_width*self.img_height)
-
-
-	def forward(self, images):
-		out_vec, out_cls = self.encode(images)
-		out_img = self.decode(out_vec)
-		return out_img, out_vec, out_cls
-
-	def encode(self, images):
-		code = self.enc_cnn_1(images)
-		code = F.selu(F.max_pool2d(code, 2))
-
-		code = self.enc_cnn_2(code)
-		code = F.selu(F.max_pool2d(code, 2))
-
-		code = code.view([images.size(0), -1])
-		code = F.selu(self.enc_linear_1(code))
-		out_vec = self.enc_linear_21(code)
-		out_cls = self.enc_linear_22(code)
-		return out_vec, out_cls
-
-	def decode(self, code):
-		out = F.selu(self.dec_linear_1(code))
-		out = F.sigmoid(self.dec_linear_2(out))
-		out = out.view([code.size(0), 1, self.img_width, self.img_height])
-		return out
-
 
 class Resnet(nn.Module):
 	def __init__(self, embedding_dim, num_typo, img_size):
@@ -125,23 +79,31 @@ class Resnet(nn.Module):
 										)
 		# [batch x 512 x 1 x 8]
 		self.projector = nn.Conv2d(512, embedding_dim, (1,8))
-		self.classifier = nn.Linear(512 * 8, num_typo)
-
-		# Decoder specification
-		self.dec_linear = nn.Sequential(
-										nn.Linear(512 * 8, self.img_width*self.img_height),
-										nn.Sigmoid()
-										)
+		self.classifier = nn.Linear(300, num_typo)
 
 	def forward(self, image):
 		res_vec = self.content_conv(image)
 		out_vec = self.projector(res_vec).squeeze()
-		out_cls = self.classifier(res_vec.view(res_vec.size(0), -1))
-		out_img = self.dec_linear(res_vec.view(res_vec.size(0), -1))
-		out_img = out_img.view([image.size(0), 1, self.img_width, self.img_height])
+		out_cls = self.classifier(out_vec.view(res_vec.size(0), -1))
 
-		return out_img, out_vec, out_cls
+		return out_vec, out_cls
 
+#======================================================================================================#
+#======================================================================================================#
+
+class Mahalanobis_dist(nn.Module):
+	def __init__(self, embedding_dim, num_typo):
+		super(Mahalanobis_dist, self).__init__()
+		self.sigma = nn.Parameter(torch.randn(embedding_dim, embedding_dim))
+
+	def forward(self, u, v):
+		delta = u - v
+		ret = torch.sum(torch.mul(delta, torch.mm(self.sigma, delta.t()).t()), 1)
+		return ret
+
+
+#======================================================================================================#
+#======================================================================================================#
 
 '''
 class Image_Encoder(nn.Module):

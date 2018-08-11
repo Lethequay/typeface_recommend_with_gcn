@@ -64,10 +64,11 @@ if __name__ == '__main__':
 	parser.add_argument('--model_path', type=str, default='./models')
 	parser.add_argument('--sample_path', type=str, default='./samples')
 	parser.add_argument('--result_path', type=str, default='./results')
+	parser.add_argument('--log_path', type=str, default='./logs')
 	parser.add_argument('--data_path', type=str, default='./data/fiu_indexed.npy')
 	parser.add_argument('--img_path', type=str, default='./data/idx_png/')
 	parser.add_argument('--log_step', type=int , default=300)
-	parser.add_argument('--val_step', type=int , default=5)
+	parser.add_argument('--val_step', type=int , default=1)
 
 	config = parser.parse_args()
 	print(config)
