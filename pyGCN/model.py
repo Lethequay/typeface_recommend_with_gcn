@@ -14,17 +14,20 @@ class GCN(nn.Module):
 
         self.gc1 = GraphConvolution(nfeat, nhid)
         self.gc2 = GraphConvolution(nhid, nfeat)
-        self.classifier = nn.Linear(nfeat, nclass)
+        self.classifier1 = nn.Linear(nfeat, nclass)
+        self.classifier2 = nn.Linear(nfeat, nclass)
         self.dropout = dropout
+
+        #self.x = nn.Parameter(torch.randn(6237+2349, 300))
 
     def forward(self, x, adj):
         x = F.relu(self.gc1(x, adj))
         x = F.dropout(x, self.dropout, training=self.training)
         x = self.gc2(x, adj)
-        text_cls = self.classifier(x[:4576])
-        img_cls  = self.classifier(x[4576:])
+        text_cls = self.classifier1(x[:6237])
+        img_cls  = self.classifier2(x[6237:])
 
-        return F.log_softmax(x, 0), text_cls, img_cls
+        return x, text_cls, img_cls
 
 #======================================================================================================#
 #======================================================================================================#
@@ -100,17 +103,10 @@ class Resnet(nn.Module):
 		self.projector = nn.Conv2d(512, embedding_dim, (1,8))
 		self.classifier = nn.Linear(512 * 8, num_typo)
 
-		# Decoder specification
-		self.dec_linear = nn.Sequential(
-										nn.Linear(512 * 8, self.img_width*self.img_height),
-										nn.Sigmoid()
-										)
 
 	def forward(self, image):
 		res_vec = self.content_conv(image)
 		out_vec = self.projector(res_vec).squeeze()
 		out_cls = self.classifier(res_vec.view(res_vec.size(0), -1))
-		out_img = self.dec_linear(res_vec.view(res_vec.size(0), -1))
-		out_img = out_img.view([image.size(0), 1, self.img_width, self.img_height])
 
-		return out_img, out_vec, out_cls
+		return out_vec, out_cls

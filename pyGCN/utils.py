@@ -31,7 +31,7 @@ class ImageLoader(data.Dataset):
 		"""Returns the total number of font files."""
 		return len(self.image_paths)
 
-def img_loader(image_path, image_size, batch_size, num_workers=2):
+def img_loader(image_path, image_size, batch_size, num_workers=0):
 	"""Builds and returns Dataloader."""
 
 	transform = transforms.Compose([
@@ -73,10 +73,40 @@ class TextLoader(data.Dataset):
 		"""Returns the total number of font files."""
 		return len(self.idx2text)
 
-def text_loader(batch_size, num_workers=2):
+def text_loader(batch_size, num_workers=0):
 	"""Builds and returns Dataloader."""
 
 	dataset = TextLoader()
+	data_loader = data.DataLoader(dataset=dataset,
+								  batch_size=batch_size,
+								  shuffle=False,
+								  num_workers=num_workers)
+	return data_loader
+
+#======================================================================================================#
+#======================================================================================================#
+
+class PairLoader(data.Dataset):
+	"""Load Variaty Chinese Fonts for Iterator."""
+	def __init__(self, data_path):
+		"""Initializes image paths and preprocessing module."""
+		self.data_arr = np.load(data_path)
+
+	def __getitem__(self, index):
+		"""Reads an image from a file and preprocesses it and returns."""
+		text = self.data_arr[index][0]
+		typo = self.data_arr[index][1]
+
+		return text, typo
+
+	def __len__(self):
+		"""Returns the total number of font files."""
+		return self.data_arr.shape[0]
+
+def pair_loader(data_path, batch_size, num_workers=0):
+	"""Builds and returns Dataloader."""
+
+	dataset = PairLoader(data_path)
 	data_loader = data.DataLoader(dataset=dataset,
 								  batch_size=batch_size,
 								  shuffle=False,
@@ -88,16 +118,18 @@ def text_loader(batch_size, num_workers=2):
 def normalize(mx):
     """Row-normalize sparse matrix"""
     rowsum = mx.sum(1)
-    r_inv = torch.pow(rowsum, -0.5).view(-1)
-    #r_inv[torch.isinf(r_inv)] = 0.
-    r_mat_inv = torch.diag(r_inv)
-    mx = r_mat_inv.mm(mx.t()).mm(r_mat_inv.t())
+    r_inv_sqrt = torch.pow(rowsum, -0.5).view(-1)
+    #r_inv_sqrt[torch.isinf(r_inv_sqrt)] = 0.
+    r_mat_inv_sqrt = torch.diag(r_inv_sqrt)
+    mx = torch.mm(torch.mm(r_mat_inv_sqrt, mx), r_mat_inv_sqrt)
 
+    '''
     # T
     r_inv = torch.pow(rowsum, -1).view(-1)
     #r_inv[torch.isinf(r_inv)] = 0.
     r_mat_inv = torch.diag(r_inv)
-    mx = mx.mm(r_mat_inv.t()).mm(mx.t())
+    mx = torch.mm(torch.mm(mx, r_mat_inv), mx)
+    '''
     return mx
 
 
