@@ -14,6 +14,12 @@ def main(config):
 							  image_size=config.image_size,
 							  batch_size=config.batch_size,
 							  num_workers=config.num_workers)
+	valid_loader = get_loader(mode='valid',
+							 data_path=config.data_path,
+							 image_path=config.img_path,
+							 image_size=config.image_size,
+							 batch_size=config.batch_size,
+							 num_workers=config.num_workers)
 	test_loader = get_loader(mode='test',
 							 data_path=config.data_path,
 							 image_path=config.img_path,
@@ -21,7 +27,7 @@ def main(config):
 							 batch_size=config.batch_size,
 							 num_workers=config.num_workers)
 
-	solver = Solver(config, train_loader, test_loader)
+	solver = Solver(config, train_loader, valid_loader, test_loader)
 
 	# Create directories if not exist
 	if not os.path.exists(config.model_path):

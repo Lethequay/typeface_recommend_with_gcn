@@ -29,22 +29,27 @@ class DataFolder(data.Dataset):
 
 		self.transform = transform
 		self.train_dataset = []
+		self.valid_dataset = []
 		self.test_dataset = []
 		self.preprocess()
 
 		if mode == 'train':
 			self.data_size = len(self.train_dataset)
+		elif mode == 'valid':
+			self.data_size = len(self.valid_dataset)
 		else:
 			self.data_size = len(self.test_dataset)
 		print("typo count :", self.typo_cnt)
-		print("image count :", len(self.image_paths))
 		print("data count :", self.data_size)
 
 	def preprocess(self):
-		train_thr = int(len(self.data_arr) * 0.8)
+		train_thr = int(len(self.data_arr) * 0.7)
+		valid_thr = int(len(self.data_arr) * 0.8)
 		for i, data in enumerate(self.data_arr):
 			if (i+1) < train_thr:
 				self.train_dataset.append(data)
+			elif (i+1) < valid_thr:
+				self.valid_dataset.append(data)
 			else:
 				self.test_dataset.append(data)
 

@@ -12,10 +12,11 @@ from data_loader import img_loader
 from model import *
 
 class Solver(object):
-    def __init__(self, config, train_loader, test_loader):
+    def __init__(self, config, train_loader, valid_loader, test_loader):
 
         # Data loader
         self.train_loader = train_loader
+        self.valid_loader = valid_loader
         self.test_loader = test_loader
         self.image_loader = img_loader(config.img_path, config.image_size, config.batch_size)
 
@@ -95,7 +96,7 @@ class Solver(object):
         if os.path.isfile(te_path) and os.path.isfile(ie_path):
             self.text_encoder.load_state_dict(torch.load(te_path, map_location=lambda storage, loc: storage))
             self.image_encoder.load_state_dict(torch.load(ie_path, map_location=lambda storage, loc: storage))
-            print('te/se is Successfully Loaded from %d epoch'%resume_iters)
+            print('te/ie is Successfully Loaded from %d epoch'%resume_iters)
             return resume_iters
         else:
             return 0
@@ -112,9 +113,10 @@ class Solver(object):
             text_sim = torch.mm(text_emb, features.t())
             _, sort_idx = torch.sort(text_sim)
             mat_cnt = sum([j in sort_idx[i,:30] for (i,j) in torch.nonzero(text_typo_label)])
-            sim_score_ = (mat_cnt/len(torch.nonzero(text_typo_label)))
+            precision = mat_cnt/(30*text_emb.size(0))
+            recall = mat_cnt/len(torch.nonzero(text_typo_label))
 
-            return sim_score_
+            return precision, recall
 
 
     def train(self):
@@ -147,11 +149,13 @@ class Solver(object):
                 loss_img_cls = F.cross_entropy(out_cls, typography.to(self.device))
 
                 # Joint Embedding
-                #loss_joint = F.triplet_margin_loss(text_emb, pos_style_emb, neg_style_emb, margin=1)
+                loss_joint = F.triplet_margin_loss(text_emb, pos_style_emb, neg_style_emb, margin=1)
                 # Mahalanobis distance
-                loss_joint = 1 + self.distance(text_emb, pos_style_emb) - self.distance(text_emb, neg_style_emb)
-                loss_joint, _ = torch.max(torch.stack((torch.zeros(text.size(0)).to(self.device), loss_joint), 0), 0)
-                loss_joint = torch.sum(loss_joint)
+                #loss_joint = 1 + self.distance(text_emb, pos_style_emb) - self.distance(text_emb, neg_style_emb)
+                #loss_joint, _ = torch.max(torch.stack((torch.zeros(text.size(0)).to(self.device), loss_joint), 0), 0)
+                #loss_joint = torch.sum(loss_joint)
+                # LSE
+                #loss_joint = F.mse_loss(text_emb, pos_style_emb, size_average=False)
 
                 # Accuracy
                 _, pred  = torch.sort(text_cls, 1, descending=True)
@@ -160,7 +164,7 @@ class Solver(object):
                 img_acc += accuracy_at_k(pred.data.cpu().numpy(), typography)
 
                 # Compute gradient penalty
-                total_loss = loss_text_cls + loss_joint + loss_img_cls
+                total_loss = loss_joint#loss_text_cls + loss_joint + loss_img_cls
 
                 # Backprop + Optimize
                 self.reset_grad()
@@ -189,8 +193,6 @@ class Solver(object):
 
             #==================================== Validation ====================================#
             if (epoch+1) % self.val_step == 0:
-                self.text_encoder.train(False)
-                self.image_encoder.train(False)
                 self.text_encoder.eval()
                 self.image_encoder.eval()
 
@@ -199,40 +201,43 @@ class Solver(object):
                 img_acc  = 0.
                 text_feat = []
                 text_label= []
-                for i, (typography, image, _, text, text_len, text_typo_label) in enumerate(self.test_loader):
-                    image = image.to(self.device)
-                    text = text.to(self.device)
-                    text_len = text_len.to(self.device)
-                    text_typo_label = text_typo_label.type(torch.cuda.FloatTensor)
+                with torch.no_grad():
+                    for i, (typography, image, _, text, text_len, text_typo_label) in enumerate(self.valid_loader):
+                        image = image.to(self.device)
+                        text = text.to(self.device)
+                        text_len = text_len.to(self.device)
+                        text_typo_label = text_typo_label.type(torch.cuda.FloatTensor)
 
-                    # (batch x z_dim)
-                    text_emb, text_cls  = self.text_encoder(text, text_len)
-                    text_feat.append(text_emb)
-                    text_label.append(text_typo_label)
-                    # (batch x z_dim), (batch x z_dim)
-                    style_emb, img_cls = self.image_encoder(image)
+                        # (batch x z_dim)
+                        text_emb, text_cls  = self.text_encoder(text, text_len)
+                        text_feat.append(text_emb)
+                        text_label.append(text_typo_label)
+                        # (batch x z_dim), (batch x z_dim)
+                        style_emb, img_cls = self.image_encoder(image)
 
-                    val_loss+= torch.mean((text_emb - style_emb) ** 2).item()
+                        val_loss+= torch.mean((text_emb - style_emb) ** 2).item()
 
-                    _, pred  = torch.sort(text_cls, 1, descending=True)
-                    text_acc+= baccuracy_at_k(pred.data.cpu().numpy(), text_typo_label)
+                        _, pred  = torch.sort(text_cls, 1, descending=True)
+                        text_acc+= baccuracy_at_k(pred.data.cpu().numpy(), text_typo_label)
 
-                    _, pred  = torch.sort(img_cls, 1, descending=True)
-                    img_acc += accuracy_at_k(pred.data.cpu().numpy(), typography)
+                        _, pred  = torch.sort(img_cls, 1, descending=True)
+                        img_acc += accuracy_at_k(pred.data.cpu().numpy(), typography)
 
                 text_feat = torch.cat(text_feat, 0)
                 text_label= torch.cat(text_label,0)
-                sim_score_ = self.sim_score(text_feat, text_label)
-                print("Sim Score@30: {:.4f} ".format(sim_score_), end='')
-                self.writer.add_scalar('Sim Acc@30', sim_score_, epoch)
+                precision, recall = self.sim_score(text_feat, text_label)
+                print("Val Prec.@30: {:.4f} ".format(precision), end='')
+                print("Val Recall@30: {:.4f} ".format(recall), end='')
+                self.writer.add_scalar('Val Prec.@30', precision, epoch)
+                self.writer.add_scalar('Val Recall.@30', recall, epoch)
                 self.writer.add_scalar('Text Cls Acc@30', text_acc/(i+1), epoch)
                 print('Val Loss: {:.4f}, Text Acc@30: {:.4f}, Image Acc@5: {:.4f}'\
                       .format(val_loss/(i+1), text_acc/(i+1), img_acc/(i+1)))
 
                 te_path = os.path.join(self.model_path, 'text-encoder-%d.pkl' %(epoch+1))
                 ie_path = os.path.join(self.model_path, 'image-encoder-%d.pkl' %(epoch+1))
-                #torch.save(self.text_encoder.state_dict(), te_path)
-                #torch.save(self.image_encoder.state_dict(), ie_path)
+                torch.save(self.text_encoder.state_dict(), te_path)
+                torch.save(self.image_encoder.state_dict(), ie_path)
 
                 self.text_encoder.train(True)
                 self.image_encoder.train(True)
@@ -240,47 +245,40 @@ class Solver(object):
     def sample(self):
 
         self.restore_model(self.sample_epochs)
-        word2id = np.load("./data/word_emb/gb_w2i.npy").item()
-        typo_list = np.load('./data/typo_list.npy')
+        self.text_encoder.eval()
+        self.image_encoder.eval()
 
-        cl_typo = None
-        cl_dist = -1
-
-        anch = 'fancy car'.split(' ')
-        anch_word = [word2id[word] for word in anch]
-        anch_word+= [1]*(self.text_maxlen-len(anch_word))
-        anch_word = Variable(torch.from_numpy(np.asarray(anch_word))).cuda().unsqueeze(0)
-        anch_len = Variable(torch.from_numpy(np.asarray([len(anch)]))).cuda()
-
+        val_loss = 0.
         text_acc = 0.
+        img_acc  = 0.
+        text_feat = []
+        text_label= []
         with torch.no_grad():
-            anch_vec, anch_cls = self.text_encoder(anch_word, anch_len)
-
             for i, (typography, image, _, text, text_len, text_typo_label) in enumerate(self.test_loader):
                 image = image.to(self.device)
                 text = text.to(self.device)
                 text_len = text_len.to(self.device)
+                text_typo_label = text_typo_label.type(torch.cuda.FloatTensor)
 
+                # (batch x z_dim)
                 text_emb, text_cls  = self.text_encoder(text, text_len)
-                style_emb, out_cls = self.image_encoder(image)
+                text_feat.append(text_emb)
+                text_label.append(text_typo_label)
+                # (batch x z_dim), (batch x z_dim)
+                style_emb, img_cls = self.image_encoder(image)
 
-                # TASK 1 : Paragraph to Typography classification
+                val_loss+= torch.mean((text_emb - style_emb) ** 2).item()
+
                 _, pred  = torch.sort(text_cls, 1, descending=True)
                 text_acc+= baccuracy_at_k(pred.data.cpu().numpy(), text_typo_label)
 
-                # TASK 2 : The Closest Words from a Typography Image
+                _, pred  = torch.sort(img_cls, 1, descending=True)
+                img_acc += accuracy_at_k(pred.data.cpu().numpy(), typography)
 
-                # TASK 3 : The Closest Typographies from a Word
-                # (batch_size)
-                mm = F.cosine_similarity(anch_vec, style_emb)
-                max_value, max_idx = torch.max(mm.unsqueeze(0), 1)
-                if cl_dist < max_value[0]:
-                    cl_dist = max_value[0]
-                    cl_typo = typo_list[typography[max_idx[0]].numpy()]
-                    print(cl_dist.cpu().numpy(), cl_typo)
-
-                # TASK 4 : Visualization
-
-            # Results
-            print('TASK 1 : Text Acc@30: {:.4f}'.format(text_acc/(i+1)))
-            print('TASK 3 : The Closest Typo with {} is {}'.format(anch, cl_typo))
+        text_feat = torch.cat(text_feat, 0)
+        text_label= torch.cat(text_label,0)
+        precision, recall = self.sim_score(text_feat, text_label)
+        print("Val Prec.@30: {:.4f} ".format(precision), end='')
+        print("Val Recall@30: {:.4f} ".format(recall), end='')
+        print('Val Loss: {:.4f}, Text Acc@30: {:.4f}, Image Acc@5: {:.4f}'\
+                      .format(val_loss/(i+1), text_acc/(i+1), img_acc/(i+1)))
