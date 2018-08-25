@@ -37,6 +37,7 @@ class Solver(object):
         self.beta1 = config.beta1
         self.beta2 = config.beta2
         self.text_maxlen = config.text_maxlen
+        self.at = 30
 
         # Training settings
         self.start_epochs = config.start_epochs
@@ -64,7 +65,7 @@ class Solver(object):
         self.image_encoder = Resnet(self.z_dim, self.num_typo, self.image_size)
         self.distance = Mahalanobis_dist(self.z_dim, self.num_typo)
         self.optimizer = optim.Adam(list(filter(lambda p: p.requires_grad, self.text_encoder.parameters())) + \
-                                    list(self.image_encoder.parameters()),
+                                    list(self.image_encoder.parameters()),# + list(self.distance.parameters()),
                                     self.lr, [self.beta1, self.beta2])
 
         if torch.cuda.is_available():
@@ -112,11 +113,12 @@ class Solver(object):
 
             text_sim = torch.mm(text_emb, features.t())
             _, sort_idx = torch.sort(text_sim)
-            mat_cnt = sum([j in sort_idx[i,:30] for (i,j) in torch.nonzero(text_typo_label)])
-            precision = mat_cnt/(30*text_emb.size(0))
+            mat_cnt = sum([j in sort_idx[i,:self.at] for (i,j) in torch.nonzero(text_typo_label)])
+            precision = mat_cnt/(self.at*text_emb.size(0))
             recall = mat_cnt/len(torch.nonzero(text_typo_label))
 
-            return precision, recall
+            print("mat_cnt :",mat_cnt, ", 30*text_emb :", self.at*text_emb.size(0), ", len(nonzero) :", len(torch.nonzero(text_typo_label)))
+        return precision, recall
 
 
     def train(self):
@@ -149,13 +151,13 @@ class Solver(object):
                 loss_img_cls = F.cross_entropy(out_cls, typography.to(self.device))
 
                 # Joint Embedding
-                loss_joint = F.triplet_margin_loss(text_emb, pos_style_emb, neg_style_emb, margin=1)
+                #loss_joint = F.triplet_margin_loss(text_emb, pos_style_emb, neg_style_emb, margin=1)
                 # Mahalanobis distance
                 #loss_joint = 1 + self.distance(text_emb, pos_style_emb) - self.distance(text_emb, neg_style_emb)
                 #loss_joint, _ = torch.max(torch.stack((torch.zeros(text.size(0)).to(self.device), loss_joint), 0), 0)
                 #loss_joint = torch.sum(loss_joint)
                 # LSE
-                #loss_joint = F.mse_loss(text_emb, pos_style_emb, size_average=False)
+                loss_joint = F.mse_loss(text_emb, pos_style_emb, size_average=False)
 
                 # Accuracy
                 _, pred  = torch.sort(text_cls, 1, descending=True)
@@ -164,7 +166,7 @@ class Solver(object):
                 img_acc += accuracy_at_k(pred.data.cpu().numpy(), typography)
 
                 # Compute gradient penalty
-                total_loss = loss_joint#loss_text_cls + loss_joint + loss_img_cls
+                total_loss = loss_joint + loss_text_cls + loss_img_cls
 
                 # Backprop + Optimize
                 self.reset_grad()

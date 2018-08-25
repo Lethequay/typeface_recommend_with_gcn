@@ -94,13 +94,12 @@ class Resnet(nn.Module):
 class Mahalanobis_dist(nn.Module):
 	def __init__(self, embedding_dim, num_typo):
 		super(Mahalanobis_dist, self).__init__()
-		self.sigma = nn.Parameter(torch.randn(embedding_dim, embedding_dim))
+		self.sigma = nn.Linear(embedding_dim, embedding_dim)
 
 	def forward(self, u, v):
 		delta = u - v
-		ret = torch.sum(torch.mul(delta, torch.mm(self.sigma, delta.t()).t()), 1)
+		ret = torch.sum(torch.mul(delta, self.sigma(delta)), 1)
 		return ret
-
 
 #======================================================================================================#
 #======================================================================================================#
