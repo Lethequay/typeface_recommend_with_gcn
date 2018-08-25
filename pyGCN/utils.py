@@ -116,28 +116,23 @@ def pair_loader(data_path, batch_size, num_workers=0):
 
 
 def normalize(mx):
-    """Row-normalize sparse matrix"""
-    rowsum = mx.sum(1)
-    r_inv_sqrt = torch.pow(rowsum, -0.5).view(-1)
-    #r_inv_sqrt[torch.isinf(r_inv_sqrt)] = 0.
-    r_mat_inv_sqrt = torch.diag(r_inv_sqrt)
-    mx = torch.mm(torch.mm(r_mat_inv_sqrt, mx), r_mat_inv_sqrt)
+	"""Row-normalize sparse matrix"""
+	rowsum = mx.sum(1)
+	r_inv_sqrt = torch.pow(rowsum, -0.5).view(-1)
+	#r_inv_sqrt[torch.isinf(r_inv_sqrt)] = 0.
+	r_mat_inv_sqrt = torch.diag(r_inv_sqrt)
+	mx = torch.mm(torch.mm(r_mat_inv_sqrt, mx), r_mat_inv_sqrt)
 
-    '''
-    # T
-    r_inv = torch.pow(rowsum, -1).view(-1)
-    #r_inv[torch.isinf(r_inv)] = 0.
-    r_mat_inv = torch.diag(r_inv)
-    mx = torch.mm(torch.mm(mx, r_mat_inv), mx)
-    '''
-    return mx
+	# T
+	#mx = torch.mm(mx, mx)
+	return mx
 
 
 def accuracy(output, labels):
-    preds = output.max(1)[1].type_as(labels)
-    correct = preds.eq(labels).double()
-    correct = correct.sum()
-    return correct / len(labels)
+	preds = output.max(1)[1].type_as(labels)
+	correct = preds.eq(labels).double()
+	correct = correct.sum()
+	return correct / len(labels)
 
 
 import torch
@@ -186,10 +181,10 @@ def baccuracy_at_k(pred, label, k=30):
 	return acc_cnt/label_size
 
 def print_network(model, name):
-    """Print out the network information."""
-    num_params = 0
-    for p in model.parameters():
-        num_params += p.numel()
-    print(model)
-    print(name)
-    print("The number of parameters: {}".format(num_params))
+	"""Print out the network information."""
+	num_params = 0
+	for p in model.parameters():
+		num_params += p.numel()
+	print(model)
+	print(name)
+	print("The number of parameters: {}".format(num_params))

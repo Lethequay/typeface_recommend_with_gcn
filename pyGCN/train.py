@@ -21,12 +21,12 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--no-cuda', action='store_true', default=False, help='Disables CUDA training.')
 parser.add_argument('--fastmode', action='store_true', default=False, help='Validate during training pass.')
 parser.add_argument('--seed', type=int, default=42, help='Random seed.')
-parser.add_argument('--epochs', type=int, default=10000, help='Number of epochs to train.')
+parser.add_argument('--epochs', type=int, default=100, help='Number of epochs to train.')
 parser.add_argument('--hidden', type=int, default=8, help='Number of hidden units.')
 parser.add_argument('--nb_heads', type=int, default=8, help='Number of head attentions.')
 parser.add_argument('--dropout', type=float, default=0.6, help='Dropout rate (1 - keep probability).')
 parser.add_argument('--alpha', type=float, default=0.2, help='Alpha for the leaky_relu.')
-parser.add_argument('--patience', type=int, default=100, help='Patience')
+parser.add_argument('--patience', type=int, default=30, help='Patience')
 
 # model hyper-parameters
 parser.add_argument('--image_size', default=(256, 32))
@@ -34,6 +34,7 @@ parser.add_argument('--word_dim', type=int, default=300)
 parser.add_argument('--z_dim', type=int, default=300)
 parser.add_argument('--text_maxlen', type=int, default=300)
 parser.add_argument('--num_typo', type=int, default=2349)
+parser.add_argument('--at', type=int, default=30)
 
 # training hyper-parameters
 parser.add_argument('--sample_epochs', type=int, default=0)
@@ -42,7 +43,7 @@ parser.add_argument('--num_epochs', type=int, default=100)
 parser.add_argument('--num_epochs_decay', type=int, default=50)
 parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--num_workers', type=int, default=8)
-parser.add_argument('--lr', type=float, default=1e-2)
+parser.add_argument('--lr', type=float, default=1e-3)
 parser.add_argument('--lambda_cls', type=float, default=10)
 parser.add_argument('--beta1', type=float, default=0.5)        # momentum1 in Adam
 parser.add_argument('--beta2', type=float, default=0.999)      # momentum2 in Adam
@@ -57,6 +58,7 @@ parser.add_argument('--log_path', type=str, default='./logs')
 parser.add_argument('--data_path', type=str, default='../data/fiu_indexed.npy')
 parser.add_argument('--img_path', type=str, default='../data/idx_png/')
 parser.add_argument('--adj_path', type=str, default='../data/matrix/text_typo_mat.npy')
+parser.add_argument('--typo_path', type=str, default='../data/typo_list.npy')
 parser.add_argument('--log_step', type=int , default=300)
 parser.add_argument('--val_step', type=int , default=5)
 
@@ -85,6 +87,8 @@ image_loader = img_loader(args.img_path, args.image_size, args.batch_size)
 adj = torch.from_numpy(np.load(args.adj_path)).type(torch.FloatTensor)
 adj[text_val] = 0
 adj[:,text_val]= 0
+adj[text_test] = 0
+adj[:,text_test]= 0
 adj = normalize(adj + torch.eye(adj.size(0)))
 
 # Model and optimizer
@@ -92,7 +96,7 @@ joint_model = GCN(nfeat=args.z_dim, nhid=args.z_dim//2, nclass=int(args.num_typo
 text_model = Text_Encoder(args.word_dim, args.z_dim, args.text_maxlen)
 image_model = Resnet(args.z_dim, args.num_typo, args.image_size)
 image_opt = optim.Adam(image_model.parameters(), args.lr, [args.beta1, args.beta2], weight_decay=args.weight_decay)
-optimizer = optim.Adam(list(text_model.parameters()) + list(image_model.projector.parameters())\
+optimizer = optim.Adam(list(text_model.parameters()) + list(image_model.parameters())\
                        + list(joint_model.parameters()),
                        args.lr, [args.beta1, args.beta2], weight_decay=args.weight_decay)
 
@@ -205,7 +209,7 @@ def train(epoch):
               'text_acc_val: {:.4f}'.format(acc_text_val),
               'time: {:.4f}s'.format(time.time() - t))
 
-    return precision
+    return recall
 
 
 def compute_test():
@@ -246,9 +250,19 @@ def compute_test():
     # Vector Similarity
     vec_sim = torch.mm(output[text_test], output[range(text_cnt,text_cnt+img_cnt)].t())
     _, sort_idx = torch.sort(vec_sim, 1, descending=True)
-    mat_cnt = sum([j in sort_idx[i,:30] for (i,j) in torch.nonzero(text_typo_list[text_test])])
-    print("Sim Prec@30: {:.4f} ".format(mat_cnt/(30*len(text_test))), end='')
+    mat_cnt = sum([j in sort_idx[i,:args.at] for (i,j) in torch.nonzero(text_typo_list[text_test])])
+    print("Sim Prec@30: {:.4f} ".format(mat_cnt/(args.at*len(text_test))), end='')
     print("Sim Recall@30: {:.4f} ".format(mat_cnt/len(torch.nonzero(text_typo_list[text_test]))), end='')
+    print("mat_cnt :",mat_cnt, ", 30*text_test :", args.at*len(text_test), ", len(nonzero) :", len(torch.nonzero(text_typo_list[text_test])))
+
+    loss_val = F.binary_cross_entropy_with_logits(text_cls[text_test], text_typo_list[text_test])
+    acc_text_val = baccuracy_at_k(text_cls[text_test], text_typo_list[text_test], k=args.at)
+    print('Val Loss: {:.4f}, Text Acc@30: {:.4f}'.format(loss_val/len(text_test), acc_text_val))
+
+    # Vector Visualization
+    text_label= list(map(str, range(text_cnt)))
+    typo_label = list(map(str, np.load(args.typo_path)))
+    writer.add_embedding(output, text_label+typo_label)
 
 
 if args.sample_epochs:
@@ -259,35 +273,29 @@ if args.sample_epochs:
 
 # Train model
 t_total = time.time()
-loss_values = []
 bad_counter = 0
-best = args.epochs + 1
+best = 0
 best_epoch = 0
-#for epoch in range(30):
-#    pretrain(epoch)
-#torch.save(image_model.state_dict(), args.model_path+'/preim-{}.pkl'.format(30))
-image_model.load_state_dict(torch.load(args.model_path+'/preim-{}.pkl'.format(30)))
-for epoch in range(args.sample_epochs, args.epochs):
-    loss_values.append(train(epoch))
 
-    if loss_values[-1] > best:
-        torch.save(joint_model.state_dict(), args.model_path+'/jm-{}.pkl'.format(epoch))
-        torch.save(text_model.state_dict(), args.model_path+'/tm-{}.pkl'.format(epoch))
-        torch.save(image_model.state_dict(), args.model_path+'/im-{}.pkl'.format(epoch))
+if args.mode == 'train':
+    print('Pretraining the image model...')
+    for epoch in range(30):
+        pretrain(epoch)
+    torch.save(image_model.state_dict(), args.model_path+'/preim-{}.pkl'.format(30))
+    image_model.load_state_dict(torch.load(args.model_path+'/preim-{}.pkl'.format(30)))
+    print('Main Train Start')
+    for epoch in range(args.sample_epochs, args.epochs):
+        train(epoch)
 
-        best = loss_values[-1]
-        best_epoch = epoch
-        bad_counter = 0
+        if epoch > 70:
+            torch.save(joint_model.state_dict(), args.model_path+'/jm-{}.pkl'.format(epoch))
+            torch.save(text_model.state_dict(), args.model_path+'/tm-{}.pkl'.format(epoch))
+            torch.save(image_model.state_dict(), args.model_path+'/im-{}.pkl'.format(epoch))
 
-    else:
-        bad_counter += 1
-
-    if bad_counter == args.patience:
-        break
-
-
-print("Optimization Finished!")
-print("Total time elapsed: {:.4f}s".format(time.time() - t_total))
+    print("Optimization Finished!")
+    print("Total time elapsed: {:.4f}s".format(time.time() - t_total))
+elif args.mode == 'test':
+    best_epoch = args.sample_epochs
 
 # Restore best model
 print('Loading {}th epoch'.format(best_epoch))

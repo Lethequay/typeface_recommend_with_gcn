@@ -93,7 +93,7 @@ def get_loader(mode, data_path, image_path, image_size, batch_size, num_workers=
 	dataset = DataFolder(mode, data_path, image_path, image_size, transform)
 	data_loader = data.DataLoader(dataset=dataset,
 								  batch_size=batch_size,
-								  shuffle=True,
+								  shuffle=False,
 								  num_workers=num_workers)
 	return data_loader
 

@@ -102,16 +102,16 @@ class Resnet(nn.Module):
                                     resnet18.layer4,
                                     )
         # [batch x 512 x 1 x 8]
-        self.projector = nn.Conv2d(128, embedding_dim, (4, 32))
+        self.projector = nn.Conv2d(128, embedding_dim, (1, 1))
         self.classifier = nn.Linear(512 * 8, num_typo)
 
 
     def forward(self, image):
         out_vec = self.conv1(image)
         res_vec = self.conv2(out_vec)
-        #res_vec = torch.mean(res_vec, 1, keepdim=True).permute(0,3,1,2)
-        #res_vec = torch.mean(res_vec, 3, keepdim=True)
-        out_vec = self.projector(out_vec).squeeze()
         out_cls = self.classifier(res_vec.view(res_vec.size(0), -1))
+
+        res_vec = F.avg_pool2d(out_vec, (4,32))
+        out_vec = self.projector(res_vec).squeeze()
 
         return out_vec, out_cls
