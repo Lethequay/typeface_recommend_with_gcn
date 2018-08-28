@@ -63,9 +63,10 @@ class Solver(object):
     def build_model(self):
         self.text_encoder = Text_Encoder(self.word_dim, self.z_dim, self.text_maxlen)
         self.image_encoder = Resnet(self.z_dim, self.num_typo, self.image_size)
-        self.distance = Mahalanobis_dist(self.z_dim, self.num_typo)
+        #self.distance = Mahalanobis_dist(self.z_dim)
+        self.distance = Angular_loss()
         self.optimizer = optim.Adam(list(filter(lambda p: p.requires_grad, self.text_encoder.parameters())) + \
-                                    list(self.image_encoder.parameters()),# + list(self.distance.parameters()),
+                                    list(self.image_encoder.parameters()) + list(self.distance.parameters()),
                                     self.lr, [self.beta1, self.beta2])
 
         if torch.cuda.is_available():
@@ -152,12 +153,10 @@ class Solver(object):
 
                 # Joint Embedding
                 #loss_joint = F.triplet_margin_loss(text_emb, pos_style_emb, neg_style_emb, margin=1)
-                # Mahalanobis distance
-                #loss_joint = 1 + self.distance(text_emb, pos_style_emb) - self.distance(text_emb, neg_style_emb)
-                #loss_joint, _ = torch.max(torch.stack((torch.zeros(text.size(0)).to(self.device), loss_joint), 0), 0)
-                #loss_joint = torch.sum(loss_joint)
+                # Mahalanobis distance & Angular_loss
+                loss_joint = self.distance(text_emb, pos_style_emb, neg_style_emb)
                 # LSE
-                loss_joint = F.mse_loss(text_emb, pos_style_emb, size_average=False)
+                #loss_joint = F.mse_loss(text_emb, pos_style_emb, size_average=False)
 
                 # Accuracy
                 _, pred  = torch.sort(text_cls, 1, descending=True)
@@ -175,8 +174,8 @@ class Solver(object):
 
                 # logging
                 loss['text_cls']= loss_text_cls.item()
-                loss['joint'] = loss_joint.item()
-                loss['img_cls']    = loss_img_cls.item()
+                loss['img_cls'] = loss_img_cls.item()
+                loss['joint']   = loss_joint.item()
 
                 # Print the log info
                 if (i+1) % self.log_step == 0:

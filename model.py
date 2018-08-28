@@ -92,15 +92,34 @@ class Resnet(nn.Module):
 #======================================================================================================#
 
 class Mahalanobis_dist(nn.Module):
-	def __init__(self, embedding_dim, num_typo):
+	def __init__(self, embedding_dim):
 		super(Mahalanobis_dist, self).__init__()
 		self.sigma = nn.Linear(embedding_dim, embedding_dim)
 
-	def forward(self, u, v):
+	def dist(self, u, v):
 		delta = u - v
-		ret = torch.sum(torch.mul(delta, self.sigma(delta)), 1)
-		return ret
+		return torch.sum(torch.mul(self.sigma(delta), delta), 1)
 
+	def forward(self, anchor, positive, negative, margin=1):
+		ret = F.relu(self.dist(anchor, positive) - self.dist(anchor, negative) + margin)
+
+		return torch.sum(ret)
+
+class Angular_loss(nn.Module):
+	def __init__(self, alpha=45):
+		super(Angular_loss, self).__init__()
+		self.alpha = 4 * (np.tan(np.deg2rad(alpha)) ** 2).item()
+
+	def dist(self, u, v):
+		return torch.norm(u - v, p=2, dim=1).pow(2)
+
+	def forward(self, anchor, postivie, negative):
+		c = (anchor + postivie)/2
+
+		ret = F.relu(self.dist(anchor, postivie)
+					 - torch.mul(self.dist(negative, c), self.alpha))
+
+		return torch.sum(ret)
 #======================================================================================================#
 #======================================================================================================#
 

@@ -56,7 +56,7 @@ if __name__ == '__main__':
 	# training hyper-parameters
 	parser.add_argument('--sample_epochs', type=int, default=50)
 	parser.add_argument('--start_epochs', type=int, default=0)
-	parser.add_argument('--num_epochs', type=int, default=100)
+	parser.add_argument('--num_epochs', type=int, default=200)
 	parser.add_argument('--num_epochs_decay', type=int, default=50)
 	parser.add_argument('--batch_size', type=int, default=32)
 	parser.add_argument('--num_workers', type=int, default=8)
@@ -74,7 +74,7 @@ if __name__ == '__main__':
 	parser.add_argument('--data_path', type=str, default='./data/fiu_indexed.npy')
 	parser.add_argument('--img_path', type=str, default='./data/idx_png/')
 	parser.add_argument('--log_step', type=int , default=300)
-	parser.add_argument('--val_step', type=int , default=1)
+	parser.add_argument('--val_step', type=int , default=5)
 
 	config = parser.parse_args()
 	print(config)
