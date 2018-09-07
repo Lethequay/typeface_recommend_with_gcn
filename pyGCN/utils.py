@@ -86,35 +86,6 @@ def text_loader(batch_size, num_workers=0):
 #======================================================================================================#
 #======================================================================================================#
 
-class PairLoader(data.Dataset):
-	"""Load Variaty Chinese Fonts for Iterator."""
-	def __init__(self, data_path):
-		"""Initializes image paths and preprocessing module."""
-		self.data_arr = np.load(data_path)
-
-	def __getitem__(self, index):
-		"""Reads an image from a file and preprocesses it and returns."""
-		text = self.data_arr[index][0]
-		typo = self.data_arr[index][1]
-
-		return text, typo
-
-	def __len__(self):
-		"""Returns the total number of font files."""
-		return self.data_arr.shape[0]
-
-def pair_loader(data_path, batch_size, num_workers=0):
-	"""Builds and returns Dataloader."""
-
-	dataset = PairLoader(data_path)
-	data_loader = data.DataLoader(dataset=dataset,
-								  batch_size=batch_size,
-								  shuffle=False,
-								  num_workers=num_workers)
-	return data_loader
-
-
-
 def normalize(mx):
 	"""Row-normalize sparse matrix"""
 	rowsum = mx.sum(1)
@@ -124,19 +95,8 @@ def normalize(mx):
 	mx = torch.mm(torch.mm(r_mat_inv_sqrt, mx), r_mat_inv_sqrt)
 
 	# T
-	#mx = torch.mm(mx, mx)
+	mx = torch.mm(mx, mx)
 	return mx
-
-
-def accuracy(output, labels):
-	preds = output.max(1)[1].type_as(labels)
-	correct = preds.eq(labels).double()
-	correct = correct.sum()
-	return correct / len(labels)
-
-
-import torch
-from torch.autograd import Variable
 
 def sort_sequence(data, len_data):
 

@@ -9,8 +9,10 @@ from utils import *
 
 
 class GCN(nn.Module):
-    def __init__(self, nfeat, nhid, nclass, dropout):
+    def __init__(self, nfeat, nhid, nclass, dropout, text_cnt):
         super(GCN, self).__init__()
+
+        self.text_cnt = text_cnt
 
         self.gc1 = GraphConvolution(nfeat, nhid)
         self.gc2 = GraphConvolution(nhid, nfeat)
@@ -24,8 +26,8 @@ class GCN(nn.Module):
         x = F.relu(self.gc1(x, adj))
         x = F.dropout(x, self.dropout, training=self.training)
         x = self.gc2(x, adj)
-        text_cls = self.classifier1(x[:6237])
-        img_cls  = self.classifier2(x[6237:])
+        text_cls = self.classifier1(x[:self.text_cnt])
+        img_cls  = self.classifier2(x[self.text_cnt:])
 
         return x, text_cls, img_cls
 
@@ -102,7 +104,10 @@ class Resnet(nn.Module):
                                     resnet18.layer4,
                                     )
         # [batch x 512 x 1 x 8]
-        self.projector = nn.Conv2d(128, embedding_dim, (1, 1))
+        self.projector = nn.Sequential(
+                                    nn.Linear(128, 256),
+                                    nn.Linear(256, embedding_dim)
+                                    )
         self.classifier = nn.Linear(512 * 8, num_typo)
 
 
@@ -111,7 +116,7 @@ class Resnet(nn.Module):
         res_vec = self.conv2(out_vec)
         out_cls = self.classifier(res_vec.view(res_vec.size(0), -1))
 
-        res_vec = F.avg_pool2d(out_vec, (4,32))
-        out_vec = self.projector(res_vec).squeeze()
+        res_vec = F.max_pool2d(out_vec, (4,32))
+        out_vec = self.projector(res_vec.squeeze())
 
         return out_vec, out_cls
