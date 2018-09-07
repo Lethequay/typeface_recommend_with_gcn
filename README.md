@@ -8,7 +8,7 @@ We propose a task where the appropriate typeface has to be predicted when given 
 2. Image Embedding Model(CNN)
 3. Joint Embedding Model(GCN)
 
-![Models](./figures/model.png, "models")
+![Models](figures/model.png)
 
 
 ## Dataset Source
@@ -16,4 +16,4 @@ https://fontsinuse.com/
 
 Graph of The Dataset
 
-![Graph](./figures/graph.png, "graph")
+![Graph](figures/graph.png)
